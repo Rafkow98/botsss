@@ -1,0 +1,7 @@
+discord
+python-dotenv
+requests
+pandas
+sqlalchemy
+mariadb
+pymysql
