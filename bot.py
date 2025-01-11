@@ -240,7 +240,7 @@ def run_bot(connection_string, token):
             if user.id not in bots:
                 cursor.execute("SELECT all_24 FROM messages_count WHERE author_id = " + str(user.id))
                 total_count = cursor.fetchone()[0]
-                cursor.execute("SELECT toxic_24 FROM messages_count WHERE author_id = " + str(user.id))
+                cursor.execute("SELECT racism_24 FROM messages_count WHERE author_id = " + str(user.id))
                 racist_count = cursor.fetchone()[0]
                 connection.commit()
 
@@ -313,37 +313,44 @@ def run_bot(connection_string, token):
         connection.commit()
 
     @bot.command(name='best')
-    async def get_best_message(ctx, user: discord.User = False, mod: str = False):
-        if ctx.channel.id != 985565935849070702:
+    async def get_best_message(ctx, user: discord.User = False):
+        if ctx.channel.id != 985565935849070702 and ctx.channel.id != 799608563566772234:
             return
         if not user:
             user = ctx.author
-        if mod == '--all':
-            cursor.execute("SELECT message_id FROM reactions WHERE author_id = " + str(user.id) +
-                           " GROUP BY message_id ORDER BY COUNT(*) DESC LIMIT 1")
-            try:
-                message_id = cursor.fetchone()[0]
-                cursor.execute("SELECT channel_id FROM messages WHERE id = " + str(message_id))
-                channel_id = cursor.fetchone()[0]
-                await ctx.reply(f"Wiadomość użytkownika {user.mention} z największą liczbą wszystkich reakcji: "
-                                f"https://discord.com/channels/{ctx.guild.id}/{channel_id}/{message_id}")
-            except TypeError:
-                await ctx.reply(f"Użytkownik {user.mention} nie napisał żadnej wiadomości na tym serwerze")
-        else:
-            cursor.execute("SELECT message_id FROM reactions WHERE author_id = " + str(user.id) +
-                           " GROUP BY message_id, reaction_id ORDER BY COUNT(*) DESC LIMIT 1")
-            try:
-                message_id = cursor.fetchone()[0]
-                cursor.execute("SELECT channel_id FROM messages WHERE id = " + str(message_id))
-                channel_id = cursor.fetchone()[0]
-                await ctx.reply(f"Wiadomość użytkownika {user.mention} z największą liczbą jednej reakcji: "
-                                f"https://discord.com/channels/{ctx.guild.id}/{channel_id}/{message_id}")
-            except TypeError:
-                await ctx.reply(f"Użytkownik {user.mention} nie napisał żadnej wiadomości na tym serwerze")
+        cursor.execute("SELECT message_id FROM reactions WHERE author_id = " + str(user.id) +
+                       " GROUP BY message_id, reaction_id ORDER BY COUNT(*) DESC LIMIT 1")
+        try:
+            message_id = cursor.fetchone()[0]
+            cursor.execute("SELECT channel_id FROM messages WHERE id = " + str(message_id))
+            channel_id = cursor.fetchone()[0]
+            await ctx.reply(f"Wiadomość użytkownika {user.mention} z największą liczbą jednej reakcji: "
+                            f"https://discord.com/channels/{ctx.guild.id}/{channel_id}/{message_id}")
+        except TypeError:
+            await ctx.reply(f"Użytkownik {user.mention} nie napisał żadnej wiadomości na tym serwerze")
         connection.commit()
-
-    @bot.command(name='czystobylo')
-    async def czystobylo(message):
-        await message.reply(random.choice(czysto))
-
+    
+    
+    @bot.command(name='bestall')
+    async def get_best_message_all(ctx, user: discord.User = False):
+        if ctx.channel.id != 985565935849070702 and ctx.channel.id != 799608563566772234:
+            return
+        if not user:
+            user = ctx.author
+        cursor.execute("SELECT message_id FROM reactions WHERE author_id = " + str(user.id) +
+                       " GROUP BY message_id ORDER BY COUNT(*) DESC LIMIT 1")
+        try:
+            message_id = cursor.fetchone()[0]
+            cursor.execute("SELECT channel_id FROM messages WHERE id = " + str(message_id))
+            channel_id = cursor.fetchone()[0]
+            await ctx.reply(f"Wiadomość użytkownika {user.mention} z największą liczbą wszystkich reakcji: "
+                            f"https://discord.com/channels/{ctx.guild.id}/{channel_id}/{message_id}")
+        except TypeError:
+            await ctx.reply(f"Użytkownik {user.mention} nie napisał żadnej wiadomości na tym serwerze")
+        connection.commit()
+    
+        @bot.command(name='czystobylo')
+        async def czystobylo(message):
+            await message.reply(random.choice(czysto))
+    
     bot.run(token)
