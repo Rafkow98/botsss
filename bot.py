@@ -349,8 +349,8 @@ def run_bot(connection_string, token):
             await ctx.reply(f"Użytkownik {user.mention} nie napisał żadnej wiadomości na tym serwerze")
         connection.commit()
     
-        @bot.command(name='czystobylo')
-        async def czystobylo(message):
-            await message.reply(random.choice(czysto))
+    @bot.command(name='czystobylo')
+    async def czystobylo(message):
+        await message.reply(random.choice(czysto))
     
     bot.run(token)
