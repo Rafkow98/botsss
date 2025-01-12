@@ -391,7 +391,7 @@ def run_bot(connection_string, token):
         for i in range(len(result)):
             try:
                 user = bot.get_user(result[i][0])
-                final += str(i) + '. ' + user.mention + ': ' + str(result[i][1]) + '\n'
+                final += str(i) + '. ' + user.name + ': ' + str(result[i][1]) + '\n'
             except AttributeError:
                 user = await bot.fetch_user(result[i][0])
                 final += str(i) + '. ' + user.name + ': ' + str(result[i][1]) + '\n'
@@ -408,7 +408,7 @@ def run_bot(connection_string, token):
         for i in range(len(result)):
             try:
                 user = bot.get_user(result[i][0])
-                final += str(i) + '. ' + user.mention + ': ' + str(result[i][1]) + '\n'
+                final += str(i) + '. ' + user.name + ': ' + str(result[i][1]) + '\n'
             except AttributeError:
                 user = await bot.fetch_user(result[i][0])
                 final += str(i) + '. ' + user.name + ': ' + str(result[i][1]) + '\n'
@@ -425,10 +425,12 @@ def run_bot(connection_string, token):
         for i in range(len(result)):
             try:
                 user = bot.get_user(result[i][0])
-                final += str(i) + '. ' + user.mention + ': ' + str(result[i][1]) + '\n'
+                final += str(i) + '. ' + user.name + ': ' + str(result[i][1]) + '\n'
             except AttributeError:
                 user = await bot.fetch_user(result[i][0])
                 final += str(i) + '. ' + user.name + ': ' + str(result[i][1]) + '\n'
+            except NotFound:
+                final += str(i) + '. usunięty użytkownik: ' + str(result[i][1]) + '\n'
         await ctx.reply('Najwięcej otrzymanych reakcji na serwerze (tylko otwarte i istniejące kanały):\n' + final)
 
     bot.run(token)
