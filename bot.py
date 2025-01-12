@@ -26,6 +26,7 @@ def run_bot(connection_string, token):
         'https://media.discordapp.net/attachments/902300785466040370/980959555666182194/kowalski.gif?ex=6779b4c7&is=67786347&hm=bbc24b6f3bf4f57baff91e56d2fb47f1d40c2537a9af1ff610fd3b0de3350e9f&',
         'https://media1.tenor.com/m/c9WptHOa_LMAAAAd/pong.gif',
         'https://media1.tenor.com/m/nRhIzRSb9lcAAAAd/hamuj-jabłonowski.gif',
+        'https://cdn.discordapp.com/attachments/815522218213244958/1327760435856015511/ezgif-5-3b1bf3bb1d.gif?ex=67843cc4&is=6782eb44&hm=48e92cc855316c44ebfd867fcf28bb66f85b778f0560d131f50321e1722dccf9&',
         'https://media.discordapp.net/attachments/834503336979857471/1231702797871742976/ezgif.com-animated-gif-maker.gif?ex=677ce55e&is=677b93de&hm=2b95d9277e621cd4ed0340818a887faf69fe6c0f6a5ac97d2aed8c48b2f34566&=']
 
     czysto = [
@@ -266,18 +267,25 @@ def run_bot(connection_string, token):
     @bot.command(name='help')
     async def get_help(ctx):
         await ctx.reply('## Dostępne komendy:\n\n'
+                        '### Kanał https://discord.com/channels/733758693971066960/985565935849070702:\n'
                         '**!avatar [@user]** - wyświetla avatar użytkownika\n'
                         '**!best [@user]** - wyświetla wiadomość z największą liczbą pojedynczej reakcji\n'
                         '**!bestall [@user]** - wyświetla wiadomość z największą liczbą wszystkich reakcji\n'
-                        '**!czystobylo** - losowy gif z serii czysto było\n'
-                        '**!first [@user]** - wyświetla pierwszą wiadomość użytkownika\n\n'
-                        '**!facebook | fb** - link do Facebooka\n'
-                        '**!twitch | tt** - link do Twitcha\n'
-                        '**!youtube | yt** - link do YouTube\n\n'
+                        '**!first [@user]** - wyświetla pierwszą wiadomość użytkownika\n'
+                        '**!messages** - ranking liczby wiadomości na serwerze (TOP10)\n'
+                        '**!reactions** - ranking liczby dodanych reakcji (TOP10)\n'
+                        '**!reacted** - ranking liczby otrzymanych reakcji (TOP10)\n'
+                        '**!stats [@user]** - statystyki użytkownika - liczba wiadomości oraz dodanych i otrzymanych reakcji\n'
                         '**!racism [@user]** - wyświetla poziom rasizmu użytkownika (procent wiadomości, '
                         'użytkownik musi mieć minimum 100 wiadomości i 10 rasistowskich wiadomości na serwerze)\n'
                         '**!toxic [@user]** - wyświetla poziom toksyczności użytkownika (procent wiadomości, '
                         'użytkownik musi mieć minimum 100 wiadomości i 10 toksycznych wiadomości na serwerze)\n\n'
+                        '### Wszystkie kanały:\n'
+                        '**!czystobylo** - losowy gif z serii czysto było\n'
+                        '**!help** - zbiór dostępnych komend\n'
+                        '**!facebook | fb** - link do Facebooka\n'
+                        '**!twitch | tt** - link do Twitcha\n'
+                        '**!youtube | yt** - link do YouTube\n\n'
                         '**[]** - opcjonalny argument\n'
                         '**|** - alias')
 
@@ -329,8 +337,7 @@ def run_bot(connection_string, token):
         except TypeError:
             await ctx.reply(f"Użytkownik {user.mention} nie napisał żadnej wiadomości na tym serwerze")
         connection.commit()
-    
-    
+
     @bot.command(name='bestall')
     async def get_best_message_all(ctx, user: discord.User = False):
         if ctx.channel.id != 985565935849070702 and ctx.channel.id != 799608563566772234:
@@ -348,9 +355,80 @@ def run_bot(connection_string, token):
         except TypeError:
             await ctx.reply(f"Użytkownik {user.mention} nie napisał żadnej wiadomości na tym serwerze")
         connection.commit()
-    
+
     @bot.command(name='czystobylo')
     async def czystobylo(message):
         await message.reply(random.choice(czysto))
-    
+
+    @bot.command(name='stats')
+    async def get_stats(ctx, user: discord.User = False):
+        if ctx.channel.id != 985565935849070702 and ctx.channel.id != 799608563566772234 and ctx.channel.id != 857643204958879797:
+            return
+        if not user:
+            user = ctx.author
+        cursor.execute("SELECT `all`, reaction, reacted FROM messages_count WHERE author_id = " + str(user.id))
+        result = cursor.fetchone()
+        all_messages = result[0]
+        reactions = result[1]
+        reacted = result[2]
+        connection.commit()
+        try:
+            await ctx.reply(f"Statystyki użytkownika {user.mention}:\n"
+                            f"Liczba wiadomości: {all_messages}\n"
+                            f"Liczba dodanych reakcji: {reactions}\n"
+                            f"Liczba otrzymanych reakcji: {reacted}")
+        except discord.ext.commands.errors.UserNotFound:
+            await ctx.reply(f"Użytkownika nie ma na serwerze")
+
+    @bot.command(name='messages')
+    async def get_stats(ctx):
+        if ctx.channel.id != 985565935849070702 and ctx.channel.id != 799608563566772234 and ctx.channel.id != 857643204958879797:
+            return
+        cursor.execute("SELECT author_id, `all` FROM messages_count ORDER BY `all` DESC LIMIT 10")
+        result = cursor.fetchall()
+        connection.commit()
+        final = ''
+        for i in range(len(result)):
+            try:
+                user = bot.get_user(result[i][0])
+                final += str(i) + '. ' + user.mention + ': ' + str(result[i][1]) + '\n'
+            except AttributeError:
+                user = await bot.fetch_user(result[i][0])
+                final += str(i) + '. ' + user.name + ': ' + str(result[i][1]) + '\n'
+        await ctx.reply('Najwięcej wiadomości na serwerze (tylko otwarte i istniejące kanały):\n' + final)
+
+    @bot.command(name='reactions')
+    async def get_reactions(ctx):
+        if ctx.channel.id != 985565935849070702 and ctx.channel.id != 799608563566772234 and ctx.channel.id != 857643204958879797:
+            return
+        cursor.execute("SELECT author_id, reaction FROM messages_count ORDER BY reaction DESC LIMIT 10")
+        result = cursor.fetchall()
+        connection.commit()
+        final = ''
+        for i in range(len(result)):
+            try:
+                user = bot.get_user(result[i][0])
+                final += str(i) + '. ' + user.mention + ': ' + str(result[i][1]) + '\n'
+            except AttributeError:
+                user = await bot.fetch_user(result[i][0])
+                final += str(i) + '. ' + user.name + ': ' + str(result[i][1]) + '\n'
+        await ctx.reply('Najwięcej dodanych reakcji na serwerze (tylko otwarte i istniejące kanały):\n' + final)
+
+    @bot.command(name='reacted')
+    async def get_reacted(ctx):
+        if ctx.channel.id != 985565935849070702 and ctx.channel.id != 799608563566772234 and ctx.channel.id != 857643204958879797:
+            return
+        cursor.execute("SELECT author_id, reacted FROM messages_count ORDER BY reacted DESC LIMIT 10")
+        result = cursor.fetchall()
+        connection.commit()
+        final = ''
+        for i in range(len(result)):
+            try:
+                user = bot.get_user(result[i][0])
+                final += str(i) + '. ' + user.mention + ': ' + str(result[i][1]) + '\n'
+            except AttributeError:
+                user = await bot.fetch_user(result[i][0])
+                final += str(i) + '. ' + user.name + ': ' + str(result[i][1]) + '\n'
+        await ctx.reply('Najwięcej otrzymanych reakcji na serwerze (tylko otwarte i istniejące kanały):\n' + final)
+
     bot.run(token)
