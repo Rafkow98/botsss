@@ -22,6 +22,8 @@ def run_bot(connection_string, token):
     bots = [968851237405597717, 475744554910351370, 235148962103951360, 762217899355013120, 159985870458322944,
             1311665961027244084, 734535151899639910, 1311665961027244084]
 
+    command_channels = [985565935849070702, 799608563566772234, 857643204958879797]
+
     gifs = [
         'https://media.discordapp.net/attachments/902300785466040370/980959555666182194/kowalski.gif?ex=6779b4c7&is=67786347&hm=bbc24b6f3bf4f57baff91e56d2fb47f1d40c2537a9af1ff610fd3b0de3350e9f&',
         'https://media1.tenor.com/m/c9WptHOa_LMAAAAd/pong.gif',
@@ -208,54 +210,58 @@ def run_bot(connection_string, token):
 
     @bot.command(name='toxic')
     async def count_toxic_messages(ctx, user: discord.User = False):
-        if ctx.channel.id != 985565935849070702 and ctx.channel.id != 799608563566772234:
+        if ctx.channel.id not in command_channels:
             return
-        try:
-            if not user:
-                user = ctx.author
-            if user.id not in bots:
-                cursor.execute("SELECT all_24 FROM messages_count WHERE author_id = " + str(user.id))
-                total_count = cursor.fetchone()[0]
-                cursor.execute("SELECT toxic_24 FROM messages_count WHERE author_id = " + str(user.id))
-                toxic_count = cursor.fetchone()[0]
-                connection.commit()
+        if not user:
+            user = ctx.author
+        if user.id not in bots:
+            cursor.execute("SELECT all_24 FROM messages_count WHERE author_id = " + str(user.id))
+            total_count = cursor.fetchone()[0]
+            cursor.execute("SELECT toxic_24 FROM messages_count WHERE author_id = " + str(user.id))
+            toxic_count = cursor.fetchone()[0]
+            connection.commit()
 
-                if total_count > 100:
-                    if toxic_count > 10:
-                        await ctx.reply(
-                            f"Poziom toksyczności użytkownika {user.mention} wynosi {round(toxic_count / total_count * 100, 3)}%.")
-                    else:
-                        await ctx.reply(f"Użytkownik {user.mention} ma mniej niż 10 toksycznych wiadomości na serwerze")
+            if total_count > 100:
+                if toxic_count > 10:
+                    await ctx.reply(
+                        f"Poziom toksyczności użytkownika {user.mention} wynosi {round(toxic_count / total_count * 100, 3)}%.")
                 else:
-                    await ctx.reply(f"Użytkownik {user.mention} ma mniej niż 100 wiadomości na serwerze")
-        except discord.ext.commands.errors.UserNotFound:
-            await ctx.reply(f"Użytkownika nie ma na serwerze")
+                    await ctx.reply(f"Użytkownik {user.mention} ma mniej niż 10 toksycznych wiadomości na serwerze")
+            else:
+                await ctx.reply(f"Użytkownik {user.mention} ma mniej niż 100 wiadomości na serwerze")
+
+    @count_toxic_messages.error
+    async def info_error(ctx, error):
+        if isinstance(error, commands.BadArgument):
+            await ctx.reply('Użytkownika nie ma na serwerze')
 
     @bot.command(name='racism')
     async def count_racist_messages(ctx, user: discord.User = False):
-        if ctx.channel.id != 985565935849070702 and ctx.channel.id != 799608563566772234:
+        if ctx.channel.id not in command_channels:
             return
-        try:
-            if not user:
-                user = ctx.author
-            if user.id not in bots:
-                cursor.execute("SELECT all_24 FROM messages_count WHERE author_id = " + str(user.id))
-                total_count = cursor.fetchone()[0]
-                cursor.execute("SELECT racism_24 FROM messages_count WHERE author_id = " + str(user.id))
-                racist_count = cursor.fetchone()[0]
-                connection.commit()
+        if not user:
+            user = ctx.author
+        if user.id not in bots:
+            cursor.execute("SELECT all_24 FROM messages_count WHERE author_id = " + str(user.id))
+            total_count = cursor.fetchone()[0]
+            cursor.execute("SELECT racism_24 FROM messages_count WHERE author_id = " + str(user.id))
+            racist_count = cursor.fetchone()[0]
+            connection.commit()
 
-                if total_count > 100:
-                    if racist_count > 10:
-                        await ctx.reply(
-                            f"Poziom rasizmu użytkownika {user.mention} wynosi {round(racist_count / total_count * 100, 3)}%.")
-                    else:
-                        await ctx.reply(
-                            f"Użytkownik {user.mention} ma mniej niż 10 rasistowskich wiadomości na serwerze")
+            if total_count > 100:
+                if racist_count > 10:
+                    await ctx.reply(
+                        f"Poziom rasizmu użytkownika {user.mention} wynosi {round(racist_count / total_count * 100, 3)}%.")
                 else:
-                    await ctx.reply(f"Użytkownik {user.mention} ma mniej niż 100 wiadomości na serwerze")
-        except discord.ext.commands.errors.UserNotFound:
-            await ctx.reply(f"Użytkownika nie ma na serwerze")
+                    await ctx.reply(
+                        f"Użytkownik {user.mention} ma mniej niż 10 rasistowskich wiadomości na serwerze")
+            else:
+                await ctx.reply(f"Użytkownik {user.mention} ma mniej niż 100 wiadomości na serwerze")
+
+    @count_racist_messages.error
+    async def info_error(ctx, error):
+        if isinstance(error, commands.BadArgument):
+            await ctx.reply('Użytkownika nie ma na serwerze')
 
     @bot.command(name='avatar')
     async def get_avatar(ctx, user: discord.User = False):
@@ -303,7 +309,7 @@ def run_bot(connection_string, token):
 
     @bot.command(name='first')
     async def get_first_message(ctx, user: discord.User = False):
-        if ctx.channel.id != 985565935849070702:
+        if ctx.channel.id not in command_channels:
             return
         if not user:
             user = ctx.author
@@ -320,9 +326,14 @@ def run_bot(connection_string, token):
             await ctx.reply(f"Użytkownik {user.mention} nie napisał żadnej wiadomości na tym serwerze")
         connection.commit()
 
+    @get_first_message.error
+    async def info_error(ctx, error):
+        if isinstance(error, commands.BadArgument):
+            await ctx.reply('Użytkownika nie ma na serwerze')
+
     @bot.command(name='best')
     async def get_best_message(ctx, user: discord.User = False):
-        if ctx.channel.id != 985565935849070702 and ctx.channel.id != 799608563566772234:
+        if ctx.channel.id not in command_channels:
             return
         if not user:
             user = ctx.author
@@ -338,9 +349,14 @@ def run_bot(connection_string, token):
             await ctx.reply(f"Użytkownik {user.mention} nie napisał żadnej wiadomości na tym serwerze")
         connection.commit()
 
+    @get_best_message.error
+    async def info_error(ctx, error):
+        if isinstance(error, commands.BadArgument):
+            await ctx.reply('Użytkownika nie ma na serwerze')
+
     @bot.command(name='bestall')
     async def get_best_message_all(ctx, user: discord.User = False):
-        if ctx.channel.id != 985565935849070702 and ctx.channel.id != 799608563566772234:
+        if ctx.channel.id not in command_channels:
             return
         if not user:
             user = ctx.author
@@ -356,33 +372,47 @@ def run_bot(connection_string, token):
             await ctx.reply(f"Użytkownik {user.mention} nie napisał żadnej wiadomości na tym serwerze")
         connection.commit()
 
+    @get_best_message_all.error
+    async def info_error(ctx, error):
+        if isinstance(error, commands.BadArgument):
+            await ctx.reply('Użytkownika nie ma na serwerze')
+
     @bot.command(name='czystobylo')
     async def czystobylo(message):
         await message.reply(random.choice(czysto))
 
     @bot.command(name='stats')
     async def get_stats(ctx, user: discord.User = False):
-        if ctx.channel.id != 985565935849070702 and ctx.channel.id != 799608563566772234 and ctx.channel.id != 857643204958879797:
+        if ctx.channel.id not in command_channels:
             return
         if not user:
             user = ctx.author
-        cursor.execute("SELECT `all`, reaction, reacted FROM messages_count WHERE author_id = " + str(user.id))
+        cursor.execute("SELECT * FROM (SELECT `all`, reaction, reacted, reacted/`all`, rank() over(order by `all` desc) as rank_all, "
+                       "rank() over(order by reaction desc) as rank_reactions, rank() over(order by reacted desc) "
+                       "as rank_reacted, rank() over(order by reacted/`all` desc) as ratio, author_id FROM messages_count) "
+                       "as t WHERE author_id = " + str(user.id))
         result = cursor.fetchone()
-        all_messages = result[0]
-        reactions = result[1]
-        reacted = result[2]
         connection.commit()
-        try:
-            await ctx.reply(f"Statystyki użytkownika {user.mention}:\n"
-                            f"Liczba wiadomości: {all_messages}\n"
-                            f"Liczba dodanych reakcji: {reactions}\n"
-                            f"Liczba otrzymanych reakcji: {reacted}")
-        except discord.ext.commands.errors.UserNotFound:
-            await ctx.reply(f"Użytkownika nie ma na serwerze")
+        final = (f"Statystyki użytkownika {user.mention}:\n"
+                 f"Liczba wiadomości: {result[0]} ({result[4]}.)\n"
+                 f"Liczba dodanych reakcji: {result[1]} ({result[5]}.)\n"
+                 f"Liczba otrzymanych reakcji: {result[2]} ({result[6]}.)\n"
+                 f"Ratio otrzymane reakcje:wiadomości: {result[3]} ({result[7]}.)")
+        embed = discord.Embed(
+            colour=discord.Colour.dark_green(),
+            title='Najwięcej otrzymanych reakcji na serwerze (tylko otwarte i istniejące kanały)',
+            description=final
+        )
+        await ctx.reply(embed=embed)
+
+    @get_stats.error
+    async def info_error(ctx, error):
+        if isinstance(error, commands.BadArgument):
+            await ctx.reply('Użytkownika nie ma na serwerze')
 
     @bot.command(name='messages')
     async def get_stats(ctx):
-        if ctx.channel.id != 985565935849070702 and ctx.channel.id != 799608563566772234 and ctx.channel.id != 857643204958879797:
+        if ctx.channel.id not in command_channels:
             return
         cursor.execute("SELECT author_id, `all` FROM messages_count ORDER BY `all` DESC LIMIT 10")
         result = cursor.fetchall()
@@ -398,11 +428,17 @@ def run_bot(connection_string, token):
                     final += str(i) + '. ' + user.name + ': ' + str(result[i][1]) + '\n'
                 except discord.errors.NotFound:
                     final += str(i) + '. usunięty użytkownik: ' + str(result[i][1]) + '\n'
-        await ctx.reply('Najwięcej wiadomości na serwerze (tylko otwarte i istniejące kanały):\n' + final)
+        embed = discord.Embed(
+            colour=discord.Colour.dark_green(),
+            title='Najwięcej wiadomości na serwerze (tylko otwarte i istniejące kanały)',
+            description=final
+        )
+        await ctx.reply(embed=embed)
+        # await ctx.reply('Najwięcej wiadomości na serwerze (tylko otwarte i istniejące kanały):\n' + final)
 
     @bot.command(name='reactions')
     async def get_reactions(ctx):
-        if ctx.channel.id != 985565935849070702 and ctx.channel.id != 799608563566772234 and ctx.channel.id != 857643204958879797:
+        if ctx.channel.id not in command_channels:
             return
         cursor.execute("SELECT author_id, reaction FROM messages_count ORDER BY reaction DESC LIMIT 10")
         result = cursor.fetchall()
@@ -418,11 +454,16 @@ def run_bot(connection_string, token):
                     final += str(i) + '. ' + user.name + ': ' + str(result[i][1]) + '\n'
                 except discord.errors.NotFound:
                     final += str(i) + '. usunięty użytkownik: ' + str(result[i][1]) + '\n'
-        await ctx.reply('Najwięcej dodanych reakcji na serwerze (tylko otwarte i istniejące kanały):\n' + final)
+        embed = discord.Embed(
+            colour=discord.Colour.dark_green(),
+            title='Najwięcej dodanych reakcji na serwerze (tylko otwarte i istniejące kanały)',
+            description=final
+        )
+        await ctx.reply(embed=embed)
 
     @bot.command(name='reacted')
     async def get_reacted(ctx):
-        if ctx.channel.id != 985565935849070702 and ctx.channel.id != 799608563566772234 and ctx.channel.id != 857643204958879797:
+        if ctx.channel.id not in command_channels:
             return
         cursor.execute("SELECT author_id, reacted FROM messages_count ORDER BY reacted DESC LIMIT 10")
         result = cursor.fetchall()
@@ -438,6 +479,11 @@ def run_bot(connection_string, token):
                     final += str(i) + '. ' + user.name + ': ' + str(result[i][1]) + '\n'
                 except discord.errors.NotFound:
                     final += str(i) + '. usunięty użytkownik: ' + str(result[i][1]) + '\n'
-        await ctx.reply('Najwięcej otrzymanych reakcji na serwerze (tylko otwarte i istniejące kanały):\n' + final)
+        embed = discord.Embed(
+            colour=discord.Colour.dark_green(),
+            title='Najwięcej otrzymanych reakcji na serwerze (tylko otwarte i istniejące kanały)',
+            description=final
+        )
+        await ctx.reply(embed=embed)
 
     bot.run(token)
