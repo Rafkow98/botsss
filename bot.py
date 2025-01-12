@@ -393,8 +393,11 @@ def run_bot(connection_string, token):
                 user = bot.get_user(result[i][0])
                 final += str(i) + '. ' + user.name + ': ' + str(result[i][1]) + '\n'
             except AttributeError:
-                user = await bot.fetch_user(result[i][0])
-                final += str(i) + '. ' + user.name + ': ' + str(result[i][1]) + '\n'
+                try:
+                    user = await bot.fetch_user(result[i][0])
+                    final += str(i) + '. ' + user.name + ': ' + str(result[i][1]) + '\n'
+                except discord.errors.NotFound:
+                    final += str(i) + '. usunięty użytkownik: ' + str(result[i][1]) + '\n'
         await ctx.reply('Najwięcej wiadomości na serwerze (tylko otwarte i istniejące kanały):\n' + final)
 
     @bot.command(name='reactions')
@@ -410,8 +413,11 @@ def run_bot(connection_string, token):
                 user = bot.get_user(result[i][0])
                 final += str(i) + '. ' + user.name + ': ' + str(result[i][1]) + '\n'
             except AttributeError:
-                user = await bot.fetch_user(result[i][0])
-                final += str(i) + '. ' + user.name + ': ' + str(result[i][1]) + '\n'
+                try:
+                    user = await bot.fetch_user(result[i][0])
+                    final += str(i) + '. ' + user.name + ': ' + str(result[i][1]) + '\n'
+                except discord.errors.NotFound:
+                    final += str(i) + '. usunięty użytkownik: ' + str(result[i][1]) + '\n'
         await ctx.reply('Najwięcej dodanych reakcji na serwerze (tylko otwarte i istniejące kanały):\n' + final)
 
     @bot.command(name='reacted')
