@@ -272,28 +272,33 @@ def run_bot(connection_string, token):
 
     @bot.command(name='help')
     async def get_help(ctx):
-        await ctx.reply('## Dostępne komendy:\n\n'
-                        '### Kanał https://discord.com/channels/733758693971066960/985565935849070702:\n'
-                        '**!avatar [@user]** - wyświetla avatar użytkownika\n'
-                        '**!best [@user]** - wyświetla wiadomość z największą liczbą pojedynczej reakcji\n'
-                        '**!bestall [@user]** - wyświetla wiadomość z największą liczbą wszystkich reakcji\n'
-                        '**!first [@user]** - wyświetla pierwszą wiadomość użytkownika\n'
-                        '**!messages** - ranking liczby wiadomości na serwerze (TOP10)\n'
-                        '**!reactions** - ranking liczby dodanych reakcji (TOP10)\n'
-                        '**!reacted** - ranking liczby otrzymanych reakcji (TOP10)\n'
-                        '**!stats [@user]** - statystyki użytkownika - liczba wiadomości oraz dodanych i otrzymanych reakcji\n'
-                        '**!racism [@user]** - wyświetla poziom rasizmu użytkownika (procent wiadomości, '
-                        'użytkownik musi mieć minimum 100 wiadomości i 10 rasistowskich wiadomości na serwerze)\n'
-                        '**!toxic [@user]** - wyświetla poziom toksyczności użytkownika (procent wiadomości, '
-                        'użytkownik musi mieć minimum 100 wiadomości i 10 toksycznych wiadomości na serwerze)\n\n'
-                        '### Wszystkie kanały:\n'
-                        '**!czystobylo** - losowy gif z serii czysto było\n'
-                        '**!help** - zbiór dostępnych komend\n'
-                        '**!facebook | fb** - link do Facebooka\n'
-                        '**!twitch | tt** - link do Twitcha\n'
-                        '**!youtube | yt** - link do YouTube\n\n'
-                        '**[]** - opcjonalny argument\n'
-                        '**|** - alias')
+        final = ('### Kanał https://discord.com/channels/733758693971066960/985565935849070702:\n'
+                 '**!avatar [@user]** - wyświetla avatar użytkownika\n'
+                 '**!best [@user]** - wyświetla wiadomość z największą liczbą pojedynczej reakcji\n'
+                 '**!bestall [@user]** - wyświetla wiadomość z największą liczbą wszystkich reakcji\n'
+                 '**!first [@user]** - wyświetla pierwszą wiadomość użytkownika\n'
+                 '**!messages** - ranking liczby wiadomości na serwerze (TOP10)\n'
+                 '**!reactions** - ranking liczby dodanych reakcji (TOP10)\n'
+                 '**!reacted** - ranking liczby otrzymanych reakcji (TOP10)\n'
+                 '**!stats [@user]** - statystyki użytkownika - liczba wiadomości oraz dodanych i otrzymanych reakcji\n'
+                 '**!racism [@user]** - wyświetla poziom rasizmu użytkownika (procent wiadomości, '
+                 'użytkownik musi mieć minimum 100 wiadomości i 10 rasistowskich wiadomości na serwerze)\n'
+                 '**!toxic [@user]** - wyświetla poziom toksyczności użytkownika (procent wiadomości, '
+                 'użytkownik musi mieć minimum 100 wiadomości i 10 toksycznych wiadomości na serwerze)\n\n'
+                 '### Wszystkie kanały:\n'
+                 '**!czystobylo** - losowy gif z serii czysto było\n'
+                 '**!help** - zbiór dostępnych komend\n'
+                 '**!facebook | fb** - link do Facebooka\n'
+                 '**!twitch | tt** - link do Twitcha\n'
+                 '**!youtube | yt** - link do YouTube\n\n'
+                 '**[]** - opcjonalny argument\n'
+                 '**|** - alias')
+        embed = discord.Embed(
+            colour=discord.Colour.dark_green(),
+            title='Dostępne komendy',
+            description=final
+        )
+        await ctx.reply(embed=embed)
 
     @bot.command(name='facebook', aliases=['fb'])
     async def get_fb(ctx):
@@ -387,20 +392,20 @@ def run_bot(connection_string, token):
             return
         if not user:
             user = ctx.author
-        cursor.execute("SELECT * FROM (SELECT `all`, reaction, reacted, reacted/`all`, rank() over(order by `all` desc) as rank_all, "
-                       "rank() over(order by reaction desc) as rank_reactions, rank() over(order by reacted desc) "
-                       "as rank_reacted, rank() over(order by reacted/`all` desc) as ratio, author_id FROM messages_count) "
-                       "as t WHERE author_id = " + str(user.id))
+        cursor.execute(
+            "SELECT * FROM (SELECT `all`, reaction, reacted, reacted/`all`, rank() over(order by `all` desc) as rank_all, "
+            "rank() over(order by reaction desc) as rank_reactions, rank() over(order by reacted desc) "
+            "as rank_reacted, rank() over(order by reacted/`all` desc) as ratio, author_id FROM messages_count) "
+            "as t WHERE author_id = " + str(user.id))
         result = cursor.fetchone()
         connection.commit()
-        final = (f"Statystyki użytkownika {user.mention}:\n"
-                 f"Liczba wiadomości: {result[0]} ({result[4]}.)\n"
+        final = (f"Liczba wiadomości: {result[0]} ({result[4]}.)\n"
                  f"Liczba dodanych reakcji: {result[1]} ({result[5]}.)\n"
                  f"Liczba otrzymanych reakcji: {result[2]} ({result[6]}.)\n"
                  f"Ratio otrzymane reakcje:wiadomości: {result[3]} ({result[7]}.)")
         embed = discord.Embed(
             colour=discord.Colour.dark_green(),
-            title='Najwięcej otrzymanych reakcji na serwerze (tylko otwarte i istniejące kanały)',
+            title=f'Statystyki użytkownika {user.name}',
             description=final
         )
         await ctx.reply(embed=embed)
