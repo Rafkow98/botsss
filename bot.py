@@ -429,7 +429,7 @@ def run_bot(connection_string, token):
             except AttributeError:
                 user = await bot.fetch_user(result[i][0])
                 final += str(i) + '. ' + user.name + ': ' + str(result[i][1]) + '\n'
-            except NotFound:
+            except discord.errors.NotFound:
                 final += str(i) + '. usunięty użytkownik: ' + str(result[i][1]) + '\n'
         await ctx.reply('Najwięcej otrzymanych reakcji na serwerze (tylko otwarte i istniejące kanały):\n' + final)
 
