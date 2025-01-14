@@ -314,8 +314,6 @@ def run_bot(connection_string, token):
 
     @bot.command(name='first')
     async def get_first_message(ctx, user: discord.User = False):
-        if ctx.channel.id not in command_channels:
-            return
         if not user:
             user = ctx.author
         cursor.execute(
@@ -338,8 +336,6 @@ def run_bot(connection_string, token):
 
     @bot.command(name='best')
     async def get_best_message(ctx, user: discord.User = False):
-        if ctx.channel.id not in command_channels:
-            return
         if not user:
             user = ctx.author
         cursor.execute("SELECT message_id FROM reactions WHERE author_id = " + str(user.id) +
@@ -361,8 +357,6 @@ def run_bot(connection_string, token):
 
     @bot.command(name='bestall')
     async def get_best_message_all(ctx, user: discord.User = False):
-        if ctx.channel.id not in command_channels:
-            return
         if not user:
             user = ctx.author
         cursor.execute("SELECT message_id FROM reactions WHERE author_id = " + str(user.id) +
@@ -388,8 +382,6 @@ def run_bot(connection_string, token):
 
     @bot.command(name='stats')
     async def get_stats(ctx, user: discord.User = False):
-        if ctx.channel.id not in command_channels:
-            return
         if not user:
             user = ctx.author
         cursor.execute(
@@ -417,8 +409,6 @@ def run_bot(connection_string, token):
 
     @bot.command(name='messages')
     async def get_stats(ctx):
-        if ctx.channel.id not in command_channels:
-            return
         cursor.execute("SELECT author_id, `all` FROM messages_count ORDER BY `all` DESC LIMIT 10")
         result = cursor.fetchall()
         connection.commit()
@@ -443,8 +433,6 @@ def run_bot(connection_string, token):
 
     @bot.command(name='reactions')
     async def get_reactions(ctx):
-        if ctx.channel.id not in command_channels:
-            return
         cursor.execute("SELECT author_id, reaction FROM messages_count ORDER BY reaction DESC LIMIT 10")
         result = cursor.fetchall()
         connection.commit()
@@ -468,8 +456,6 @@ def run_bot(connection_string, token):
 
     @bot.command(name='reacted')
     async def get_reacted(ctx):
-        if ctx.channel.id not in command_channels:
-            return
         cursor.execute("SELECT author_id, reacted FROM messages_count ORDER BY reacted DESC LIMIT 10")
         result = cursor.fetchall()
         connection.commit()
