@@ -86,6 +86,10 @@ def run_bot(connection_string, token):
         await channel.send(f'{member.mention} has left the server. Goodbye! <:brzoza:857643791165685821>',
                            file=discord.File("img/discordsss.jpg", filename="welcome.gif"))"""
 
+        if member.id == 258707097036914689:
+            channel = await bot.fetch_channel(734136364689260604)
+            await channel.send(file=discord.File("IMG_9668.png", filename="IMG_9668.png"))
+
     @bot.event
     async def on_message(message):
         if bot.user.mentioned_in(message) and message.type != MessageType.reply:
