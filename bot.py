@@ -46,6 +46,7 @@ def run_bot(connection_string, token):
 
     @bot.event
     async def on_ready():
+        ping_user.start()
         channels_list = []
         members_list = []
         emojis_list = []
@@ -476,5 +477,34 @@ def run_bot(connection_string, token):
             description=final
         )
         await ctx.reply(embed=embed)
+
+    
+
+    reepo = ['czas przypomnieć światu, że lewactwo i sałatka to styl życia, a nie wyrok.',
+             'jem mięso, powstrzymasz mnie?',
+             'obudź się, bo inaczej skończysz jak liga AMS2 - martwy i zapomniany',
+             'AMS2 umarł szybciej niż Twoja motywacja, gratulacje!',
+             'rusz się, ty narciarzu sałatkożerco z ADHD? Sałatkożerco, dawaj szybciej, bo nawet sałata ma dziś więcej energii od Ciebie!',
+             'jak tam? Znowu planujesz zabić coś, co działało, czy wystarczy ci AMS na koncie porażek?',
+             'jesteś jak AMS – pełen obietnic, a skończyło się katastrofą.',
+             'liga AMS mówi cześć z zaświatów – podobno zabrakło ci lewackiej organizacji, żeby ją uratować.',
+             'AMS to twoje dzieło – taki pomnik, na który nawet gołębie nie chcą srać.',
+             'Twoje zarządzanie AMS to był prawdziwy speedrun w kategorii ‘jak rozwalić ligę’.']
+
+    @tasks.loop(minutes=15)
+    async def ping_user():
+        channel = bot.get_channel(896704719022592011)
+        if channel:
+            user = await bot.fetch_user(258707097036914689)
+            if user:
+                await channel.send(f'{user.mention}, ' + random.choice(reepo))
+            else:
+                print(f'Nie znaleziono użytkownika o ID {686636820196491305}')
+        else:
+            print(f'Nie znaleziono kanału o ID {857643204958879797}')
+
+    @ping_user.before_loop
+    async def before_ping():
+        await bot.wait_until_ready()
 
     bot.run(token)
