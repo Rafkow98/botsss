@@ -29,7 +29,11 @@ def run_bot(connection_string, token):
         'https://media1.tenor.com/m/c9WptHOa_LMAAAAd/pong.gif',
         'https://media1.tenor.com/m/nRhIzRSb9lcAAAAd/hamuj-jabłonowski.gif',
         'https://cdn.discordapp.com/attachments/815522218213244958/1327760435856015511/ezgif-5-3b1bf3bb1d.gif?ex=67843cc4&is=6782eb44&hm=48e92cc855316c44ebfd867fcf28bb66f85b778f0560d131f50321e1722dccf9&',
-        'https://media.discordapp.net/attachments/834503336979857471/1231702797871742976/ezgif.com-animated-gif-maker.gif?ex=677ce55e&is=677b93de&hm=2b95d9277e621cd4ed0340818a887faf69fe6c0f6a5ac97d2aed8c48b2f34566&=']
+        'https://media.discordapp.net/attachments/834503336979857471/1231702797871742976/ezgif.com-animated-gif-maker.gif?ex=677ce55e&is=677b93de&hm=2b95d9277e621cd4ed0340818a887faf69fe6c0f6a5ac97d2aed8c48b2f34566&=',
+        'https://media.discordapp.net/attachments/1159912825473466531/1186340488148688916/attachment.gif?ex=67ad716d&is=67ac1fed&hm=a75c50d1d00577f3771a3a5ae16d17e8baf13c4cecb52094d0c44cbd296059a6&',
+        'https://cdn.discordapp.com/attachments/738723839759876149/1296002243165814784/reeporage.gif?ex=67ad9625&is=67ac44a5&hm=825b20c5bccdae02a8fab5c152e7918f9dcf0f144f4179a31ce8f11171f99123&',
+        'https://cdn.discordapp.com/attachments/733758693971066963/1312169661491712151/CFEL.gif?ex=67adbc7a&is=67ac6afa&hm=2ee65621e7b54c45a820a20ddf5c8d230a3e3e7c8e22f34a42460d60af81da34&',
+        'https://media1.tenor.com/m/XmcozQ2VzLMAAAAd/bonk-greve.gif']
 
     czysto = [
         'https://media.discordapp.net/attachments/995375885781831730/1108518508733673473/ezgif.com-video-to-gif_1.gif?ex=677bad8f&is=677a5c0f&hm=f460b598f6a0a501657f6ddfebc21fd9929ca3923342a4bffa199bb878289055&=',
