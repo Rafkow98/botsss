@@ -33,7 +33,8 @@ def run_bot(connection_string, token):
         'https://media.discordapp.net/attachments/1159912825473466531/1186340488148688916/attachment.gif?ex=67ad716d&is=67ac1fed&hm=a75c50d1d00577f3771a3a5ae16d17e8baf13c4cecb52094d0c44cbd296059a6&',
         'https://cdn.discordapp.com/attachments/738723839759876149/1296002243165814784/reeporage.gif?ex=67ad9625&is=67ac44a5&hm=825b20c5bccdae02a8fab5c152e7918f9dcf0f144f4179a31ce8f11171f99123&',
         'https://cdn.discordapp.com/attachments/733758693971066963/1312169661491712151/CFEL.gif?ex=67adbc7a&is=67ac6afa&hm=2ee65621e7b54c45a820a20ddf5c8d230a3e3e7c8e22f34a42460d60af81da34&',
-        'https://media1.tenor.com/m/XmcozQ2VzLMAAAAd/bonk-greve.gif']
+        'https://media1.tenor.com/m/XmcozQ2VzLMAAAAd/bonk-greve.gif',
+        'https://media.discordapp.net/attachments/893248676082900994/903014221590175744/ffd7b3f9-dc66-43c2-b11d-a07d120ec320.gif?ex=67bb8207&is=67ba3087&hm=7fe381f03e34186ccc0f4030e4d3c68a9e8f4d5a697bb24b0cf2cde46a16958b&=']
 
     czysto = [
         'https://media.discordapp.net/attachments/995375885781831730/1108518508733673473/ezgif.com-video-to-gif_1.gif?ex=677bad8f&is=677a5c0f&hm=f460b598f6a0a501657f6ddfebc21fd9929ca3923342a4bffa199bb878289055&=',
