@@ -52,6 +52,8 @@ def run_bot(connection_string, token):
 
     invite_pattern = re.compile(r"discord\.gg\/[A-Za-z0-9]+|discord\.com\/invite\/[A-Za-z0-9]+")
 
+    admins = [523929325171638280, 341537077474885632, 917064080366391386, 686636820196491305, 258707097036914689, 250367142073991178]
+
     @bot.event
     async def on_ready():
         ping_user.start()
@@ -137,8 +139,11 @@ def run_bot(connection_string, token):
                     text("UPDATE messages_count SET `all` = `all` + 1, all_24 = all_24 + 1 WHERE author_id = :id"),
                     {'id': message.author.id})
         if invite_pattern.search(message.content):
-            await message.delete()
-            await message.channel.send('usuń konto')
+            if message.author.id not in admins:
+                await message.delete()
+                await message.channel.send(
+                    f'{message.author.mention}, wysyłanie zaproszeń jest zabronione na tym serwerze')
+
         await bot.process_commands(message)
 
     @bot.event
