@@ -49,6 +49,8 @@ def run_bot(connection_string, token):
 
     racist_words = ['niger', 'nigger', 'niga', 'nyga', 'nigga', 'czarnuch', 'murzyn', 'rasis', 'rasiz']
 
+    invite_pattern = re.compile(r"discord\.gg\/[A-Za-z0-9]+|discord\.com\/invite\/[A-Za-z0-9]+")
+
     @bot.event
     async def on_ready():
         ping_user.start()
@@ -133,6 +135,9 @@ def run_bot(connection_string, token):
                 cnx.execute(
                     text("UPDATE messages_count SET `all` = `all` + 1, all_24 = all_24 + 1 WHERE author_id = :id"),
                     {'id': message.author.id})
+        if invite_pattern.search(message.content):
+            await message.delete()
+            await message.channel.send('https://images-ext-1.discordapp.net/external/63_eFZo_RvQPsOEF7UCe0NheGT5ledM4Y6PaJql2XIk/https/media.tenor.com/c5a_h8U1MzkAAAPo/nuh-uh-beocord.mp4')
         await bot.process_commands(message)
 
     @bot.event
@@ -245,7 +250,7 @@ def run_bot(connection_string, token):
         if isinstance(error, commands.BadArgument):
             await ctx.reply('Użytkownika nie ma na serwerze')
 
-    @bot.command(name='racism')
+    '''@bot.command(name='racism')
     async def count_racist_messages(ctx, user: discord.User = False):
         if ctx.channel.id not in command_channels:
             return
@@ -271,7 +276,7 @@ def run_bot(connection_string, token):
     @count_racist_messages.error
     async def info_error(ctx, error):
         if isinstance(error, commands.BadArgument):
-            await ctx.reply('Użytkownika nie ma na serwerze')
+            await ctx.reply('Użytkownika nie ma na serwerze')'''
 
     @bot.command(name='avatar')
     async def get_avatar(ctx, user: discord.User = False):
@@ -291,8 +296,6 @@ def run_bot(connection_string, token):
                  '**!reactions** - ranking liczby dodanych reakcji (TOP10)\n'
                  '**!reacted** - ranking liczby otrzymanych reakcji (TOP10)\n'
                  '**!stats [@user]** - statystyki użytkownika - liczba wiadomości oraz dodanych i otrzymanych reakcji\n'
-                 '**!racism [@user]** - wyświetla poziom rasizmu użytkownika (procent wiadomości, '
-                 'użytkownik musi mieć minimum 100 wiadomości i 10 rasistowskich wiadomości na serwerze)\n'
                  '**!toxic [@user]** - wyświetla poziom toksyczności użytkownika (procent wiadomości, '
                  'użytkownik musi mieć minimum 100 wiadomości i 10 toksycznych wiadomości na serwerze)\n\n'
                  '### Wszystkie kanały:\n'
@@ -301,6 +304,8 @@ def run_bot(connection_string, token):
                  '**!facebook | fb** - link do Facebooka\n'
                  '**!twitch | tt** - link do Twitcha\n'
                  '**!youtube | yt** - link do YouTube\n\n'
+                 '**!twitter | x** - link do X/Twittera\n\n'
+                 '**!instagram | ig** - link do Instagrama\n\n'
                  '**[]** - opcjonalny argument\n'
                  '**|** - alias')
         embed = discord.Embed(
@@ -321,6 +326,14 @@ def run_bot(connection_string, token):
     @bot.command(name='youtube', aliases=['yt'])
     async def get_yt(ctx):
         await ctx.reply('https://www.youtube.com/SimSprintSeries')
+
+    @bot.command(name='twitter', aliases=['x'])
+    async def get_x(ctx):
+        await ctx.reply('https://www.x.com/SimSprintSeries')
+
+    @bot.command(name='instagram', aliases=['ig'])
+    async def get_ig(ctx):
+        await ctx.reply('https://www.instagram.com/SimSprintSeries')
 
     @bot.command(name='first')
     async def get_first_message(ctx, user: discord.User = False):
@@ -487,7 +500,7 @@ def run_bot(connection_string, token):
         )
         await ctx.reply(embed=embed)
 
-    
+    '''
 
     reepo = ['czas przypomnieć światu, że lewactwo i sałatka to styl życia, a nie wyrok.',
              'jem mięso, powstrzymasz mnie?',
@@ -514,6 +527,6 @@ def run_bot(connection_string, token):
 
     @ping_user.before_loop
     async def before_ping():
-        await bot.wait_until_ready()
+        await bot.wait_until_ready()'''
 
     bot.run(token)
