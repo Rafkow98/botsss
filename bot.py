@@ -137,7 +137,7 @@ def run_bot(connection_string, token):
                     {'id': message.author.id})
         if invite_pattern.search(message.content):
             await message.delete()
-            await message.channel.send('https://images-ext-1.discordapp.net/external/63_eFZo_RvQPsOEF7UCe0NheGT5ledM4Y6PaJql2XIk/https/media.tenor.com/c5a_h8U1MzkAAAPo/nuh-uh-beocord.mp4')
+            await message.channel.send('usuń konto')
         await bot.process_commands(message)
 
     @bot.event
@@ -250,7 +250,7 @@ def run_bot(connection_string, token):
         if isinstance(error, commands.BadArgument):
             await ctx.reply('Użytkownika nie ma na serwerze')
 
-    '''@bot.command(name='racism')
+    @bot.command(name='racism')
     async def count_racist_messages(ctx, user: discord.User = False):
         if ctx.channel.id not in command_channels:
             return
@@ -263,7 +263,7 @@ def run_bot(connection_string, token):
             racist_count = cursor.fetchone()[0]
             connection.commit()
 
-            if total_count > 100:
+            '''if total_count > 100:
                 if racist_count > 10:
                     await ctx.reply(
                         f"Poziom rasizmu użytkownika {user.mention} wynosi {round(racist_count / total_count * 100, 3)}%.")
