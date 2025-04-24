@@ -1,12 +1,23 @@
+import asyncio
 import random
 import re
 
+import gspread
 import pandas as pd
 
 import discord
 from discord import MessageType
-from discord.ext import commands, tasks
+from discord.ext import commands
+from oauth2client.service_account import ServiceAccountCredentials
 from sqlalchemy import create_engine, text
+
+def authenticate_google_sheets():
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+
+    creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
+
+    client = gspread.authorize(creds)
+    return client
 
 
 def run_bot(connection_string, token):
@@ -54,9 +65,47 @@ def run_bot(connection_string, token):
 
     admins = [523929325171638280, 341537077474885632, 917064080366391386, 686636820196491305, 258707097036914689, 250367142073991178]
 
+    async def send_to_discord(response):
+        message = "New Google Form Response:\n"
+        for key, value in response.items():
+            message += f"{key}: {value}\n"
+
+        channel = bot.get_channel(1324121758856642560)
+        await channel.send(message)
+
+    async def check_for_new_responses():
+        google_client = authenticate_google_sheets()
+        sheet = google_client.open('Formularz zgłoszeniowy incydentów wyścigowych SSS (Odpowiedzi)').sheet1
+        last_processed_row = len(sheet.get_all_records())
+        print(last_processed_row)
+
+        while True:
+            responses = sheet.get_all_records()
+            new_responses = responses[last_processed_row:]
+            print(new_responses)
+            last_processed_row = len(responses)
+
+            if new_responses:
+                for response in new_responses:
+                    final = (f"Zgłaszający: {response['Zgłaszający kierowca']}\n"
+                             f"Zgłaszany: {response['Zgłaszany kierowca']}\n"
+                             f"Wyścig: {response['Wyścig']}\n"
+                             f"Split: {response['Split']}\n"
+                             f"Numer okrążenia: {response['Numer okrążenia']}\n"
+                             f"Dowód: {response['Dowód']}\n"
+                             f"Opis incydentu: {response['Opis incydentu']}")
+                    embed = discord.Embed(
+                        colour=discord.Colour.dark_green(),
+                        title=f'Zgłoszenie',
+                        description=final
+                    )
+                    channel = bot.get_channel(1015386642485362744)
+                    await channel.send(embed=embed)
+
+            await asyncio.sleep(10)
+
     @bot.event
     async def on_ready():
-        ping_user.start()
         channels_list = []
         members_list = []
         emojis_list = []
@@ -76,6 +125,8 @@ def run_bot(connection_string, token):
 
         emojis = pd.DataFrame(emojis_list)
         emojis.to_sql(name='emojis', con=engine, if_exists='replace', index=False)
+
+        await check_for_new_responses()
 
     @bot.event
     async def on_member_join(member):
