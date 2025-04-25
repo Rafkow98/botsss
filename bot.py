@@ -65,24 +65,14 @@ def run_bot(connection_string, token):
 
     admins = [523929325171638280, 341537077474885632, 917064080366391386, 686636820196491305, 258707097036914689, 250367142073991178]
 
-    async def send_to_discord(response):
-        message = "New Google Form Response:\n"
-        for key, value in response.items():
-            message += f"{key}: {value}\n"
-
-        channel = bot.get_channel(1324121758856642560)
-        await channel.send(message)
-
     async def check_for_new_responses():
         google_client = authenticate_google_sheets()
         sheet = google_client.open('Formularz zgłoszeniowy incydentów wyścigowych SSS (Odpowiedzi)').sheet1
         last_processed_row = len(sheet.get_all_records())
-        print(last_processed_row)
 
         while True:
             responses = sheet.get_all_records()
             new_responses = responses[last_processed_row:]
-            print(new_responses)
             last_processed_row = len(responses)
 
             if new_responses:
@@ -96,7 +86,7 @@ def run_bot(connection_string, token):
                              f"Opis incydentu: {response['Opis incydentu']}")
                     embed = discord.Embed(
                         colour=discord.Colour.dark_green(),
-                        title=f'Zgłoszenie',
+                        title=f'Zgłoszenie {str(last_processed_row)}',
                         description=final
                     )
                     channel = bot.get_channel(1015386642485362744)
@@ -155,6 +145,8 @@ def run_bot(connection_string, token):
     async def on_message(message):
         if bot.user.mentioned_in(message) and message.type != MessageType.reply:
             await message.reply(random.choice(gifs))
+        if bot.get_channel(1365264124509945907) and len(message.attachments) == 0:
+            await message.delete()
         with engine.begin() as cnx:
             cnx.execute(text("INSERT INTO messages(id, type, timestamp, timestampEdited, isPinned, content, author_id, "
                              "channel_id, attachments, embeds, stickers, mentions) "
