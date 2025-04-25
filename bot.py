@@ -145,7 +145,7 @@ def run_bot(connection_string, token):
     async def on_message(message):
         if bot.user.mentioned_in(message) and message.type != MessageType.reply:
             await message.reply(random.choice(gifs))
-        if bot.get_channel(1365264124509945907) and len(message.attachments) == 0:
+        if message.channel.id == 1365264124509945907 and len(message.attachments) == 0:
             await message.delete()
         with engine.begin() as cnx:
             cnx.execute(text("INSERT INTO messages(id, type, timestamp, timestampEdited, isPinned, content, author_id, "
