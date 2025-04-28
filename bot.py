@@ -67,16 +67,20 @@ def run_bot(connection_string, token):
 
     async def check_for_new_responses():
         google_client = authenticate_google_sheets()
-        sheet = google_client.open('Formularz zgłoszeniowy incydentów wyścigowych SSS (Odpowiedzi)').sheet1
-        last_processed_row = len(sheet.get_all_records())
+        f1_sheet = google_client.open('Formularz zgłoszeniowy incydentów wyścigowych SSS (Odpowiedzi)').sheet1
+        f1_last_processed_row = len(f1_sheet.get_all_records())
+        acc_sheet = google_client.open('Incydenty ACC/LMU').get_worksheet(1)
+        acc_last_processed_row = len(acc_sheet.get_all_records())
+        lmu_sheet = google_client.open('Incydenty ACC/LMU').get_worksheet(0)
+        lmu_last_processed_row = len(lmu_sheet.get_all_records())
 
         while True:
-            responses = sheet.get_all_records()
-            new_responses = responses[last_processed_row:]
-            last_processed_row = len(responses)
+            f1_responses = f1_sheet.get_all_records()
+            f1_new_responses = f1_responses[f1_last_processed_row:]
+            f1_last_processed_row = len(f1_responses)
 
-            if new_responses:
-                for response in new_responses:
+            if f1_new_responses:
+                for response in f1_new_responses:
                     final = (f"Zgłaszający: {response['Zgłaszający kierowca']}\n"
                              f"Zgłaszany: {response['Zgłaszany kierowca']}\n"
                              f"Wyścig: {response['Wyścig']}\n"
@@ -86,10 +90,51 @@ def run_bot(connection_string, token):
                              f"Opis incydentu: {response['Opis incydentu']}")
                     embed = discord.Embed(
                         colour=discord.Colour.dark_green(),
-                        title=f'Zgłoszenie {str(last_processed_row)}',
+                        title=f'Zgłoszenie {str(f1_last_processed_row)}',
                         description=final
                     )
                     channel = bot.get_channel(1015386642485362744)
+                    await channel.send(embed=embed)
+
+            acc_responses = acc_sheet.get_all_records()
+            acc_new_responses = acc_responses[acc_last_processed_row:]
+            acc_last_processed_row = len(acc_responses)
+
+            if acc_new_responses:
+                for response in acc_new_responses:
+                    final = (f"Zgłaszający: {response['Kierowca zgłaszający / nr auta']}\n"
+                             f"Zgłaszany: {response['Kierowca zgłaszany / numer auta']}\n"
+                             f"Wyścig: {response['Wybierz rundę']}\n"
+                             f"Rodzaj zdarzenia: {response['Rodzaj zdarzenia']}\n"
+                             f"Dowód (link/timestamp): {response['Dowody ( Link do nagrania z incydentu/sygnatura czasowa z oficjalnej powtórki)']}\n"
+                             f"Opis incydentu: {response['Opis sytuacji']}")
+                    embed = discord.Embed(
+                        colour=discord.Colour.dark_green(),
+                        title=f'Zgłoszenie {str(acc_last_processed_row)}',
+                        description=final
+                    )
+                    channel = bot.get_channel(1366514242051903650)
+                    await channel.send(embed=embed)
+
+            lmu_responses = lmu_sheet.get_all_records()
+            lmu_new_responses = lmu_responses[lmu_last_processed_row:]
+            lmu_last_processed_row = len(lmu_responses)
+
+            if lmu_new_responses:
+                for response in lmu_new_responses:
+                    final = (f"Zgłaszający: {response['Kierowca zgłaszający / nr auta']}\n"
+                             f"Zgłaszany: {response['Kierowca zgłaszany / numer auta']}\n"
+                             f"Wyścig: {response['Wybierz rundę']}\n"
+                             f"Klasa: {response['Wybierz klasę']}\n"
+                             f"Rodzaj zdarzenia: {response['Rodzaj zdarzenia']}\n"
+                             f"Dowód (link/timestamp): {response['Dowody ( Link do nagrania z incydentu/sygnatura czasowa z oficjalnej powtórki)']}\n"
+                             f"Opis incydentu: {response['Opis sytuacji']}")
+                    embed = discord.Embed(
+                        colour=discord.Colour.dark_green(),
+                        title=f'Zgłoszenie {str(lmu_last_processed_row)}',
+                        description=final
+                    )
+                    channel = bot.get_channel(1334193229116997703)
                     await channel.send(embed=embed)
 
             await asyncio.sleep(10)
