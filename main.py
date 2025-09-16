@@ -9,7 +9,7 @@ from bot import run_bot
 def main():
     args = sys.argv[1:]
     try:
-        connection_string = f'mariadb+pymysql://{args[0]}:{args[1]}@{args[2]}:3306/{args[3]}?charset=utf8mb4'
+        connection_string = f'mysql+pymysql://{args[0]}:{args[1]}@{args[2]}:3306/{args[3]}?charset=utf8mb4'
         run_bot(connection_string, args[4])
     except IndexError:
         print('Nieprawidłowa liczba argumentów - prawidłowa kolejność: "użytkownik hasło host baza token"')
