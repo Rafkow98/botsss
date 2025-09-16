@@ -7,3 +7,4 @@ mariadb
 pymysql
 gspread
 oauth2client
+cryptography
