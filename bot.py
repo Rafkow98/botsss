@@ -74,7 +74,7 @@ def run_bot(connection_string, token):
         while True:
             f1_responses = f1_sheet.get_all_records()
             f1_new_responses = f1_responses[f1_last_processed_row:]
-            f1_last_processed_row = len(f1_responses)
+            f1_last_processed_row = len(f1_responses) - 1
 
             if f1_new_responses:
                 for response in f1_new_responses:
@@ -95,7 +95,7 @@ def run_bot(connection_string, token):
 
             acc_responses = acc_sheet.get_all_records()
             acc_new_responses = acc_responses[acc_last_processed_row:]
-            acc_last_processed_row = len(acc_responses)
+            acc_last_processed_row = len(acc_responses) - 1
 
             if acc_new_responses:
                 for response in acc_new_responses:
@@ -115,7 +115,7 @@ def run_bot(connection_string, token):
 
             lmu_responses = lmu_sheet.get_all_records()
             lmu_new_responses = lmu_responses[lmu_last_processed_row:]
-            lmu_last_processed_row = len(lmu_responses)
+            lmu_last_processed_row = len(lmu_responses) - 1
 
             if lmu_new_responses:
                 for response in lmu_new_responses:
@@ -157,6 +157,11 @@ def run_bot(connection_string, token):
 
         emojis = pd.DataFrame(emojis_list)
         emojis.to_sql(name='emojis', con=engine, if_exists='replace', index=False)
+
+        with engine.begin() as cnx:
+            cnx.execute(text("UPDATE messages SET is_active_channel = "
+                             "CASE WHEN channel_id IN (SELECT id FROM channels) THEN 1 "
+                             "ELSE 0 END"))
 
         await check_for_new_responses()
 
@@ -330,11 +335,11 @@ def run_bot(connection_string, token):
             if total_count > 100:
                 if toxic_count > 10:
                     await ctx.reply(
-                        f"Poziom toksyczności użytkownika {user.mention} wynosi {round(toxic_count / total_count * 100, 3)}%.")
+                        f"Poziom toksyczności użytkownika **{user.name}** wynosi {round(toxic_count / total_count * 100, 3)}%.")
                 else:
-                    await ctx.reply(f"Użytkownik {user.mention} ma mniej niż 10 toksycznych wiadomości na serwerze")
+                    await ctx.reply(f"Użytkownik **{user.name}** ma mniej niż 10 toksycznych wiadomości na serwerze")
             else:
-                await ctx.reply(f"Użytkownik {user.mention} ma mniej niż 100 wiadomości na serwerze")
+                await ctx.reply(f"Użytkownik **{user.name}** ma mniej niż 100 wiadomości na serwerze")
 
     @count_toxic_messages.error
     async def info_error(ctx, error):
@@ -357,12 +362,12 @@ def run_bot(connection_string, token):
             '''if total_count > 100:
                 if racist_count > 10:
                     await ctx.reply(
-                        f"Poziom rasizmu użytkownika {user.mention} wynosi {round(racist_count / total_count * 100, 3)}%.")
+                        f"Poziom rasizmu użytkownika **{user.name}** wynosi {round(racist_count / total_count * 100, 3)}%.")
                 else:
                     await ctx.reply(
-                        f"Użytkownik {user.mention} ma mniej niż 10 rasistowskich wiadomości na serwerze")
+                        f"Użytkownik **{user.name}** ma mniej niż 10 rasistowskich wiadomości na serwerze")
             else:
-                await ctx.reply(f"Użytkownik {user.mention} ma mniej niż 100 wiadomości na serwerze")
+                await ctx.reply(f"Użytkownik **{user.name}** ma mniej niż 100 wiadomości na serwerze")
 
     @count_racist_messages.error
     async def info_error(ctx, error):
@@ -374,7 +379,7 @@ def run_bot(connection_string, token):
         if not user:
             user = ctx.author
         av = user.avatar.url
-        await ctx.reply(content=f'Avatar użytkownika {user.mention}', embed=discord.Embed().set_image(url=av))
+        await ctx.reply(content=f'Avatar użytkownika **{user.name}**', embed=discord.Embed().set_image(url=av))
 
     @bot.command(name='help')
     async def get_help(ctx):
@@ -432,15 +437,16 @@ def run_bot(connection_string, token):
             user = ctx.author
         cursor.execute(
             "SELECT id FROM messages WHERE author_id = " + str(user.id) + " AND type NOT LIKE 'GuildMemberJoin' "
+                                                                          "AND is_active_channel = 1 "
                                                                           "ORDER BY DATE(timestamp) LIMIT 1")
         try:
             message_id = cursor.fetchone()[0]
             cursor.execute("SELECT channel_id FROM messages WHERE id = " + str(message_id))
             channel_id = cursor.fetchone()[0]
-            await ctx.reply(f"Pierwsza wiadomość użytkownika {user.mention}: "
+            await ctx.reply(f"Pierwsza wiadomość użytkownika **{user.name}**: "
                             f"https://discord.com/channels/{ctx.guild.id}/{channel_id}/{message_id}")
         except TypeError:
-            await ctx.reply(f"Użytkownik {user.mention} nie napisał żadnej wiadomości na tym serwerze")
+            await ctx.reply(f"Użytkownik **{user.name}** nie napisał żadnej wiadomości na tym serwerze")
         connection.commit()
 
     @get_first_message.error
@@ -452,16 +458,17 @@ def run_bot(connection_string, token):
     async def get_best_message(ctx, user: discord.User = False):
         if not user:
             user = ctx.author
-        cursor.execute("SELECT message_id FROM reactions WHERE author_id = " + str(user.id) +
-                       " GROUP BY message_id, reaction_id ORDER BY COUNT(*) DESC LIMIT 1")
+        cursor.execute("SELECT r.message_id FROM reactions r LEFT JOIN messages m ON r.message_id = m.id "
+                       "WHERE r.author_id = " + str(user.id) + " AND m.is_active_channel = 1 "
+                       "GROUP BY r.message_id, r.reaction_id ORDER BY COUNT(*) DESC LIMIT 1")
         try:
             message_id = cursor.fetchone()[0]
             cursor.execute("SELECT channel_id FROM messages WHERE id = " + str(message_id))
             channel_id = cursor.fetchone()[0]
-            await ctx.reply(f"Wiadomość użytkownika {user.mention} z największą liczbą jednej reakcji: "
+            await ctx.reply(f"Wiadomość użytkownika **{user.name}** z największą liczbą jednej reakcji: "
                             f"https://discord.com/channels/{ctx.guild.id}/{channel_id}/{message_id}")
         except TypeError:
-            await ctx.reply(f"Użytkownik {user.mention} nie napisał żadnej wiadomości na tym serwerze")
+            await ctx.reply(f"Użytkownik **{user.name}** nie napisał żadnej wiadomości na tym serwerze")
         connection.commit()
 
     @get_best_message.error
@@ -473,16 +480,17 @@ def run_bot(connection_string, token):
     async def get_best_message_all(ctx, user: discord.User = False):
         if not user:
             user = ctx.author
-        cursor.execute("SELECT message_id FROM reactions WHERE author_id = " + str(user.id) +
-                       " GROUP BY message_id ORDER BY COUNT(*) DESC LIMIT 1")
+        cursor.execute("SELECT r.message_id FROM reactions r LEFT JOIN messages m ON r.message_id = m.id "
+                       "WHERE r.author_id = " + str(user.id) + " AND m.is_active_channel = 1 "
+                       "GROUP BY r.message_id ORDER BY COUNT(*) DESC LIMIT 1")
         try:
             message_id = cursor.fetchone()[0]
             cursor.execute("SELECT channel_id FROM messages WHERE id = " + str(message_id))
             channel_id = cursor.fetchone()[0]
-            await ctx.reply(f"Wiadomość użytkownika {user.mention} z największą liczbą wszystkich reakcji: "
+            await ctx.reply(f"Wiadomość użytkownika **{user.name}** z największą liczbą wszystkich reakcji: "
                             f"https://discord.com/channels/{ctx.guild.id}/{channel_id}/{message_id}")
         except TypeError:
-            await ctx.reply(f"Użytkownik {user.mention} nie napisał żadnej wiadomości na tym serwerze")
+            await ctx.reply(f"Użytkownik **{user.name}** nie napisał żadnej wiadomości na tym serwerze")
         connection.commit()
 
     @get_best_message_all.error
