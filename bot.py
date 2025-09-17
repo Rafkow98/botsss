@@ -74,7 +74,7 @@ def run_bot(connection_string, token):
         while True:
             f1_responses = f1_sheet.get_all_records()
             f1_new_responses = f1_responses[f1_last_processed_row:]
-            f1_last_processed_row = len(f1_responses) - 1
+            f1_last_processed_row = len(f1_responses)
 
             if f1_new_responses:
                 for response in f1_new_responses:
@@ -87,7 +87,7 @@ def run_bot(connection_string, token):
                              f"Opis incydentu: {response['Opis incydentu']}")
                     embed = discord.Embed(
                         colour=discord.Colour.dark_green(),
-                        title=f'Zgłoszenie {str(f1_last_processed_row)}',
+                        title=f'Zgłoszenie {str(f1_last_processed_row + 1)}',
                         description=final
                     )
                     channel = bot.get_channel(1015386642485362744)
@@ -95,7 +95,7 @@ def run_bot(connection_string, token):
 
             acc_responses = acc_sheet.get_all_records()
             acc_new_responses = acc_responses[acc_last_processed_row:]
-            acc_last_processed_row = len(acc_responses) - 1
+            acc_last_processed_row = len(acc_responses)
 
             if acc_new_responses:
                 for response in acc_new_responses:
@@ -107,7 +107,7 @@ def run_bot(connection_string, token):
                              f"Opis incydentu: {response['Opis sytuacji']}")
                     embed = discord.Embed(
                         colour=discord.Colour.dark_green(),
-                        title=f'Zgłoszenie {str(acc_last_processed_row)}',
+                        title=f'Zgłoszenie {str(acc_last_processed_row + 1)}',
                         description=final
                     )
                     channel = bot.get_channel(1366514242051903650)
@@ -115,7 +115,7 @@ def run_bot(connection_string, token):
 
             lmu_responses = lmu_sheet.get_all_records()
             lmu_new_responses = lmu_responses[lmu_last_processed_row:]
-            lmu_last_processed_row = len(lmu_responses) - 1
+            lmu_last_processed_row = len(lmu_responses)
 
             if lmu_new_responses:
                 for response in lmu_new_responses:
@@ -124,11 +124,11 @@ def run_bot(connection_string, token):
                              f"Wyścig: {response['Wybierz rundę']}\n"
                              f"Klasa: {response['Wybierz klasę']}\n"
                              f"Rodzaj zdarzenia: {response['Rodzaj zdarzenia']}\n"
-                             f"Dowód (link/timestamp): {response['Dowody ( Link do nagrania z incydentu/sygnatura czasowa z oficjalnej powtórki)']}\n"
+                             f"Dowód (link/timestamp): {response['Dowody ( Link do nagrania z incydentu)']}\n"
                              f"Opis incydentu: {response['Opis sytuacji']}")
                     embed = discord.Embed(
                         colour=discord.Colour.dark_green(),
-                        title=f'Zgłoszenie {str(lmu_last_processed_row)}',
+                        title=f'Zgłoszenie {str(lmu_last_processed_row + 1)}',
                         description=final
                     )
                     channel = bot.get_channel(1334193229116997703)
@@ -459,7 +459,7 @@ def run_bot(connection_string, token):
         if not user:
             user = ctx.author
         cursor.execute("SELECT r.message_id FROM reactions r LEFT JOIN messages m ON r.message_id = m.id "
-                       "WHERE r.author_id = " + str(user.id) + " AND m.is_active_channel = 1 "
+                       "WHERE r.author_id = " + str(user.id) + " AND m.is_active_channel = 1 AND r.reaction_id != '' "
                        "GROUP BY r.message_id, r.reaction_id ORDER BY COUNT(*) DESC LIMIT 1")
         try:
             message_id = cursor.fetchone()[0]
