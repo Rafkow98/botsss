@@ -70,6 +70,8 @@ def run_bot(connection_string, token):
         acc_last_processed_row = len(acc_sheet.get_all_records())
         lmu_sheet = google_client.open('Incydenty ACC/LMU').get_worksheet(0)
         lmu_last_processed_row = len(lmu_sheet.get_all_records())
+        clips_sheet = google_client.open('Klipy (Odpowiedzi)').get_worksheet(0)
+        clips_last_processed_row = len(clips_sheet.get_all_records())
 
         while True:
             f1_responses = f1_sheet.get_all_records()
@@ -133,6 +135,25 @@ def run_bot(connection_string, token):
                     )
                     channel = bot.get_channel(1334193229116997703)
                     await channel.send(embed=embed)
+
+            clips_responses = clips_sheet.get_all_records()
+            clips_new_responses = clips_responses[clips_last_processed_row:]
+            clips_last_processed_row = len(clips_responses)
+
+            if clips_new_responses:
+                for response in clips_new_responses:
+                    final = (f"Nick: {response['Nick']}\n"
+                             f"Split: {response['Split']}\n"
+                             f"Wyścig: {response['Wyścig']}\n"
+                             f"Wideo: {response['Wideo']}")
+                    embed = discord.Embed(
+                        colour=discord.Colour.dark_green(),
+                        title=f'Klip {str(clips_last_processed_row + 1)}',
+                        description=final
+                    )
+                    channel = bot.get_channel(1062362633933692968)
+                    role = discord.utils.get(channel.guild.roles, id=135459784584462336)
+                    await channel.send(role.mention, embed=embed)
 
             await asyncio.sleep(10)
 
