@@ -152,7 +152,7 @@ def run_bot(connection_string, token):
                         description=final
                     )
                     channel = bot.get_channel(1062362633933692968)
-                    role = discord.utils.get(channel.guild.roles, id=135459784584462336)
+                    role = discord.utils.get(channel.guild.roles, id=1062361963277070346)
                     await channel.send(role.mention, embed=embed)
 
             await asyncio.sleep(10)
