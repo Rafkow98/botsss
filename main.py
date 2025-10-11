@@ -1,3 +1,4 @@
+import os
 import sys
 
 from discord import LoginFailure
@@ -5,20 +6,28 @@ from pymysql import OperationalError
 
 from bot import run_bot
 
+from dotenv import load_dotenv
+
+load_dotenv()
+DC_TOKEN = os.getenv('DC_TOKEN')
+SQL_LOGIN=os.getenv('SQL_LOGIN')
+SQL_PASS=os.getenv('SQL_PASS')
+HOST=os.getenv('HOST')
+DB_NAME=os.getenv('DB_NAME')
+
 
 def main():
-    args = sys.argv[1:]
     try:
-        connection_string = f'mysql+pymysql://{args[0]}:{args[1]}@{args[2]}:3306/{args[3]}?charset=utf8mb4'
-        run_bot(connection_string, args[4])
+        connection_string = f'mysql+pymysql://{SQL_LOGIN}:{SQL_PASS}@{HOST}:3306/{DB_NAME}?charset=utf8mb4'
+        run_bot(connection_string, DC_TOKEN)
     except IndexError:
-        print('Nieprawidłowa liczba argumentów - prawidłowa kolejność: "użytkownik hasło host baza token"')
+        print('Nieprawidłowa liczba argumentów')
         sys.exit()
     except OperationalError:
-        print('Nieprawidłowe dane logowania - prawidłowa kolejność: "użytkownik hasło host baza token"')
+        print('Nieprawidłowe dane logowania')
         sys.exit()
     except LoginFailure:
-        print('Nieprawidłowy token bota - prawidłowa kolejność: "użytkownik hasło host baza token"')
+        print('Nieprawidłowy token bota')
         sys.exit()
 
 
