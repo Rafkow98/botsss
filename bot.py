@@ -124,7 +124,8 @@ def run_bot(connection_string, token):
                     final = (f"Zgłaszający: {response['Kierowca zgłaszający / nr auta']}\n"
                              f"Zgłaszany: {response['Kierowca zgłaszany / numer auta']}\n"
                              f"Wyścig: {response['Wybierz rundę']}\n"
-                             f"Klasa: {response['Wybierz klasę']}\n"
+                             f"Split: {response['Split']}\n"
+                             f"Klasa: {response['Klasa Auta']}\n"
                              f"Rodzaj zdarzenia: {response['Rodzaj zdarzenia']}\n"
                              f"Dowód (link/timestamp): {response['Dowody ( Link do nagrania z incydentu)']}\n"
                              f"Opis incydentu: {response['Opis sytuacji']}")
