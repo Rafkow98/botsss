@@ -7,7 +7,7 @@ import pandas as pd
 
 import discord
 from discord import MessageType
-from discord.ext import commands
+from discord.ext import commands, tasks
 from oauth2client.service_account import ServiceAccountCredentials
 from sqlalchemy import create_engine, text
 
@@ -20,14 +20,14 @@ def authenticate_google_sheets():
     return client
 
 
-def run_bot(connection_string, token):
+def run_bot(bot_connection_string, garage_connection_string, token):
     intents = discord.Intents.all()
     intents.members = True
 
     bot = commands.Bot(command_prefix="!", intents=intents)
     bot.remove_command("help")
 
-    engine = create_engine(connection_string)
+    engine = create_engine(bot_connection_string)
     connection = engine.raw_connection()
     cursor = connection.cursor()
 
@@ -160,6 +160,7 @@ def run_bot(connection_string, token):
 
     @bot.event
     async def on_ready():
+        event_checker.start()
         channels_list = []
         members_list = []
         emojis_list = []
@@ -193,18 +194,10 @@ def run_bot(connection_string, token):
             cnx.execute(text("INSERT INTO members(id, name) VALUES(:id, :name)"),
                         {'id': member.id, 'name': member.name})
 
-        """channel = (bot.get_channel(1311665281462042624) or await bot.fetch_channel(1311665281462042624))
-        await channel.send(content=f'Welcome to the server, {member.mention}! <:brzoza:857643791165685821>',
-                           file=discord.File("img/witamywsss.gif", filename="welcome.gif"))"""
-
     @bot.event
     async def on_member_remove(member):
         with engine.begin() as cnx:
             cnx.execute(text("DELETE FROM members WHERE id = :id"), {'id': member.id})
-
-        """channel = await bot.fetch_channel(1311665281462042624)
-        await channel.send(f'{member.mention} has left the server. Goodbye! <:brzoza:857643791165685821>',
-                           file=discord.File("img/discordsss.jpg", filename="welcome.gif"))"""
 
         if member.id == 258707097036914689:
             channel = await bot.fetch_channel(734136364689260604)
@@ -367,34 +360,6 @@ def run_bot(connection_string, token):
     async def info_error(ctx, error):
         if isinstance(error, commands.BadArgument):
             await ctx.reply('Użytkownika nie ma na serwerze')
-
-    @bot.command(name='racism')
-    async def count_racist_messages(ctx, user: discord.User = False):
-        if ctx.channel.id not in command_channels:
-            return
-        if not user:
-            user = ctx.author
-        if user.id not in bots:
-            cursor.execute("SELECT all_24 FROM messages_count WHERE author_id = " + str(user.id))
-            total_count = cursor.fetchone()[0]
-            cursor.execute("SELECT racism_24 FROM messages_count WHERE author_id = " + str(user.id))
-            racist_count = cursor.fetchone()[0]
-            connection.commit()
-
-            '''if total_count > 100:
-                if racist_count > 10:
-                    await ctx.reply(
-                        f"Poziom rasizmu użytkownika **{user.name}** wynosi {round(racist_count / total_count * 100, 3)}%.")
-                else:
-                    await ctx.reply(
-                        f"Użytkownik **{user.name}** ma mniej niż 10 rasistowskich wiadomości na serwerze")
-            else:
-                await ctx.reply(f"Użytkownik **{user.name}** ma mniej niż 100 wiadomości na serwerze")
-
-    @count_racist_messages.error
-    async def info_error(ctx, error):
-        if isinstance(error, commands.BadArgument):
-            await ctx.reply('Użytkownika nie ma na serwerze')'''
 
     @bot.command(name='avatar')
     async def get_avatar(ctx, user: discord.User = False):
@@ -621,33 +586,105 @@ def run_bot(connection_string, token):
         )
         await ctx.reply(embed=embed)
 
-    '''
+    # ---------------------- Attendance Buttons ----------------------
+    class AttendanceView(discord.ui.View):
+        def __init__(self, event_id: int):
+            super().__init__(timeout=None)
+            self.discord_event_id = event_id
 
-    reepo = ['czas przypomnieć światu, że lewactwo i sałatka to styl życia, a nie wyrok.',
-             'jem mięso, powstrzymasz mnie?',
-             'obudź się, bo inaczej skończysz jak liga AMS2 - martwy i zapomniany',
-             'AMS2 umarł szybciej niż Twoja motywacja, gratulacje!',
-             'rusz się, ty narciarzu sałatkożerco z ADHD? Sałatkożerco, dawaj szybciej, bo nawet sałata ma dziś więcej energii od Ciebie!',
-             'jak tam? Znowu planujesz zabić coś, co działało, czy wystarczy ci AMS na koncie porażek?',
-             'jesteś jak AMS – pełen obietnic, a skończyło się katastrofą.',
-             'liga AMS mówi cześć z zaświatów – podobno zabrakło ci lewackiej organizacji, żeby ją uratować.',
-             'AMS to twoje dzieło – taki pomnik, na który nawet gołębie nie chcą srać.',
-             'Twoje zarządzanie AMS to był prawdziwy speedrun w kategorii ‘jak rozwalić ligę’.']
+        @discord.ui.button(label="✓ Obecność", style=discord.ButtonStyle.success)
+        async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await self.update_attendance(interaction, "accepted")
 
-    @tasks.loop(minutes=15)
-    async def ping_user():
-        channel = bot.get_channel(896704719022592011)
-        if channel:
-            user = await bot.fetch_user(258707097036914689)
-            if user:
-                await channel.send(f'{user.mention}, ' + random.choice(reepo))
-            else:
-                print(f'Nie znaleziono użytkownika o ID {686636820196491305}')
-        else:
-            print(f'Nie znaleziono kanału o ID {857643204958879797}')
+        @discord.ui.button(label="✗ Nieobecność", style=discord.ButtonStyle.danger)
+        async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await self.update_attendance(interaction, "declined")
 
-    @ping_user.before_loop
-    async def before_ping():
-        await bot.wait_until_ready()'''
+        @discord.ui.button(label="? Niepewność", style=discord.ButtonStyle.primary)
+        async def tentative(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await self.update_attendance(interaction, "tentative")
+
+        # --- Save selection and update embed ---
+        async def update_attendance(self, interaction, status):
+            garage_engine = create_engine(garage_connection_string)
+            garage_connection = garage_engine.raw_connection()
+            garage_cursor = garage_connection.cursor()
+
+            garage_cursor.execute("""
+                INSERT INTO presence (discord_bot_events_id, driver_id, status, timestamp)
+                VALUES (%s, %s, %s, current_date)
+                ON DUPLICATE KEY UPDATE status=%s
+            """, (self.discord_event_id, interaction.user.id, status, status))
+
+            garage_connection.commit()
+            garage_cursor.close()
+            garage_connection.close()
+
+            await interaction.response.send_message(f"Zgłoszono **{status}**!", ephemeral=True)
+            await update_event_embed(self.discord_event_id, interaction.message)
+
+    # ---------------------- Generate Embed ----------------------
+    def build_embed(discord_event_id):
+        garage_engine = create_engine(garage_connection_string)
+        garage_connection = garage_engine.raw_connection()
+        garage_cursor = garage_connection.cursor()
+
+        garage_cursor.execute("SELECT * FROM discord_bot_events WHERE id=%s", (discord_event_id,))
+        event = garage_cursor.fetchone()
+
+        garage_cursor.execute("SELECT * FROM presence WHERE discord_bot_events_id=%s", (discord_event_id,))
+        rows = garage_cursor.fetchall()
+
+        garage_connection.close()
+
+        accepted = [f"<@{r[4]}>" for r in rows if r[2] == "accepted"]
+        declined = [f"<@{r[4]}>" for r in rows if r[2] == "declined"]
+        tentative = [f"<@{r[4]}>" for r in rows if r[2] == "tentative"]
+
+        embed = discord.Embed(
+            title=event[1],
+            description=event[2],
+            color=discord.Color.green(),
+        )
+        embed.add_field(name=f"🟩 Obecność ({len(accepted)})", value="\n".join(accepted) or "—", inline=True)
+        embed.add_field(name=f"🟥 Nieobecność ({len(declined)})", value="\n".join(declined) or "—", inline=True)
+        embed.add_field(name=f"🟦 Niepewność ({len(tentative)})", value="\n".join(tentative) or "—", inline=True)
+
+        return embed
+
+    # ---------------------- Update Embed After User Click ----------------------
+    async def update_event_embed(discord_event_id, message):
+        embed = build_embed(discord_event_id)
+        await message.edit(embed=embed)
+
+    # ---------------------- Scheduled Task ----------------------
+    @tasks.loop(minutes=1)
+    async def event_checker():
+        garage_engine = create_engine(garage_connection_string)
+        garage_connection = garage_engine.raw_connection()
+        garage_cursor = garage_connection.cursor()
+
+        # Find events that are 10 hours away and not posted yet
+        garage_cursor.execute("""
+            SELECT * FROM discord_bot_events dbe
+            LEFT JOIN event e ON dbe.event_id = e.id
+            WHERE dbe.posted = 0 AND e.start_date <= NOW() + INTERVAL 10 HOUR
+        """)
+        events = garage_cursor.fetchall()
+
+        CHANNEL_ID = 857643204958879797
+
+        channel = bot.get_channel(CHANNEL_ID)
+
+        for event in events:
+            embed = build_embed(event[0])
+            view = AttendanceView(event[0])
+
+            await channel.send(embed=embed, view=view)
+
+            garage_cursor.execute("UPDATE discord_bot_events SET posted=1 WHERE id=%s", (event[0],))
+            garage_connection.commit()
+
+        garage_connection.close()
 
     bot.run(token)
