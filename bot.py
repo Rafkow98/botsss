@@ -1,4 +1,5 @@
 import asyncio
+import os
 import random
 import re
 
@@ -8,8 +9,12 @@ import pandas as pd
 import discord
 from discord import MessageType
 from discord.ext import commands, tasks
+from dotenv import load_dotenv
 from oauth2client.service_account import ServiceAccountCredentials
 from sqlalchemy import create_engine, text
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+load_dotenv()
 
 def authenticate_google_sheets():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -27,9 +32,11 @@ def run_bot(bot_connection_string, garage_connection_string, token):
     bot = commands.Bot(command_prefix="!", intents=intents)
     bot.remove_command("help")
 
-    engine = create_engine(bot_connection_string)
-    connection = engine.raw_connection()
-    cursor = connection.cursor()
+    scheduler = AsyncIOScheduler()
+
+    bot_engine = create_engine(bot_connection_string)
+    bot_connection = bot_engine.raw_connection()
+    bot_cursor = bot_connection.cursor()
 
     bots = [968851237405597717, 475744554910351370, 235148962103951360, 762217899355013120, 159985870458322944,
             1311665961027244084, 734535151899639910, 1311665961027244084, 1211781489931452447]
@@ -60,7 +67,7 @@ def run_bot(bot_connection_string, garage_connection_string, token):
 
     invite_pattern = re.compile(r"discord\.gg\/[A-Za-z0-9]+|discord\.com\/invite\/[A-Za-z0-9]+")
 
-    admins = [523929325171638280, 341537077474885632, 917064080366391386, 686636820196491305, 258707097036914689, 250367142073991178]
+    admins = [523929325171638280, 146344154887094273, 917064080366391386, 686636820196491305, 1376320417890963546, 308273688208211968, 1288993340532064338, 573780343488905221]
 
     async def check_for_new_responses():
         google_client = authenticate_google_sheets()
@@ -92,7 +99,7 @@ def run_bot(bot_connection_string, garage_connection_string, token):
                         title=f'Zgłoszenie {str(f1_last_processed_row + 1)}',
                         description=final
                     )
-                    channel = bot.get_channel(1015386642485362744)
+                    channel = bot.get_channel(int(os.getenv('F1_INCIDENTS_CHANNEL_ID')))
                     await channel.send(embed=embed)
 
             acc_responses = acc_sheet.get_all_records()
@@ -112,7 +119,7 @@ def run_bot(bot_connection_string, garage_connection_string, token):
                         title=f'Zgłoszenie {str(acc_last_processed_row + 1)}',
                         description=final
                     )
-                    channel = bot.get_channel(1366514242051903650)
+                    channel = bot.get_channel(int(os.getenv('ACC_INCIDENTS_CHANNEL_ID')))
                     await channel.send(embed=embed)
 
             lmu_responses = lmu_sheet.get_all_records()
@@ -124,8 +131,6 @@ def run_bot(bot_connection_string, garage_connection_string, token):
                     final = (f"Zgłaszający: {response['Kierowca zgłaszający / nr auta']}\n"
                              f"Zgłaszany: {response['Kierowca zgłaszany / numer auta']}\n"
                              f"Wyścig: {response['Wybierz rundę']}\n"
-                             f"Split: {response['Split']}\n"
-                             f"Klasa: {response['Klasa Auta']}\n"
                              f"Rodzaj zdarzenia: {response['Rodzaj zdarzenia']}\n"
                              f"Dowód (link/timestamp): {response['Dowody ( Link do nagrania z incydentu)']}\n"
                              f"Opis incydentu: {response['Opis sytuacji']}")
@@ -134,7 +139,7 @@ def run_bot(bot_connection_string, garage_connection_string, token):
                         title=f'Zgłoszenie {str(lmu_last_processed_row + 1)}',
                         description=final
                     )
-                    channel = bot.get_channel(1334193229116997703)
+                    channel = bot.get_channel(int(os.getenv('LMU_INCIDENTS_CHANNEL_ID')))
                     await channel.send(embed=embed)
 
             clips_responses = clips_sheet.get_all_records()
@@ -152,8 +157,8 @@ def run_bot(bot_connection_string, garage_connection_string, token):
                         title=f'Klip {str(clips_last_processed_row + 1)}',
                         description=final
                     )
-                    channel = bot.get_channel(1062362633933692968)
-                    role = discord.utils.get(channel.guild.roles, id=1062361963277070346)
+                    channel = bot.get_channel(int(os.getenv('CLIPS_CHANNEL_ID')))
+                    role = discord.utils.get(channel.guild.roles, id=int(os.getenv('MARKETING_ROLE_ID')))
                     await channel.send(role.mention, embed=embed)
 
             await asyncio.sleep(10)
@@ -163,54 +168,54 @@ def run_bot(bot_connection_string, garage_connection_string, token):
         event_checker.start()
         channels_list = []
         members_list = []
-        emojis_list = []
         for guild in bot.guilds:
-            for channel in guild.text_channels:
-                channels_list.append({'id': channel.id, 'name': channel.name})
-            for member in guild.members:
-                members_list.append({'id': member.id, 'name': member.name, 'avatar': member.avatar})
-            for emoji in guild.emojis:
-                emojis_list.append({'id': emoji.id, 'name': emoji.name})
+            if guild.id == int(os.getenv('SERVER_ID')):
+                for channel in guild.text_channels:
+                    channels_list.append({'id': channel.id, 'name': channel.name})
+                for member in guild.members:
+                    members_list.append({'id': member.id, 'name': member.name, 'avatar': member.avatar})
 
         channels = pd.DataFrame(channels_list)
-        channels.to_sql(name='channels', con=engine, if_exists='replace', index=False)
+        channels.to_sql(name='channels_temp', con=bot_engine, if_exists='replace', index=False)
+        with bot_engine.begin() as cnx:
+            cnx.execute(text("UPDATE channels SET is_active = 0"))
+            cnx.execute(text("UPDATE channels SET is_active = 1 "
+                             "WHERE id IN (SELECT id FROM channels_temp)"))
+            cnx.execute(text("DROP TABLE channels_temp"))
 
         members = pd.DataFrame(members_list)
-        members.to_sql(name='members', con=engine, if_exists='replace', index=False)
+        members.to_sql(name='members_temp', con=bot_engine, if_exists='replace', index=False)
+        with bot_engine.begin() as cnx:
+            cnx.execute(text("UPDATE members SET is_on_server = 0"))
+            cnx.execute(text("UPDATE members SET is_on_server = 1 "
+                             "WHERE id IN (SELECT id FROM members_temp)"))
+            cnx.execute(text("DROP TABLE members_temp"))
 
-        emojis = pd.DataFrame(emojis_list)
-        emojis.to_sql(name='emojis', con=engine, if_exists='replace', index=False)
+        asyncio.create_task(check_for_new_responses())
 
-        with engine.begin() as cnx:
-            cnx.execute(text("UPDATE messages SET is_active_channel = "
-                             "CASE WHEN channel_id IN (SELECT id FROM channels) THEN 1 "
-                             "ELSE 0 END"))
-
-        await check_for_new_responses()
+        asyncio.create_task(schedule_reminders())
+        scheduler.start()
 
     @bot.event
     async def on_member_join(member):
-        with engine.begin() as cnx:
-            cnx.execute(text("INSERT INTO members(id, name) VALUES(:id, :name)"),
-                        {'id': member.id, 'name': member.name})
+        with bot_engine.begin() as cnx:
+            cnx.execute(text("INSERT IGNORE INTO members(id) VALUES(:id)"), {'id': member.id})
+            cnx.execute(text("UPDATE members SET name = :name, avatar = :avatar, is_on_server = 1 WHERE id = :id"),
+                        {'id': member.id, 'name': member.name, 'avatar': member.avatar})
 
     @bot.event
     async def on_member_remove(member):
-        with engine.begin() as cnx:
-            cnx.execute(text("DELETE FROM members WHERE id = :id"), {'id': member.id})
-
-        if member.id == 258707097036914689:
-            channel = await bot.fetch_channel(734136364689260604)
-            await channel.send(file=discord.File("IMG_9668.png", filename="IMG_9668.png"))
+        with bot_engine.begin() as cnx:
+            cnx.execute(text("UPDATE members SET is_on_server=0 WHERE id = :id"), {'id': member.id})
 
     @bot.event
     async def on_message(message):
         if bot.user.mentioned_in(message) and message.type != MessageType.reply:
             await message.reply(random.choice(gifs))
-        if message.channel.id == 1365264124509945907 and len(message.attachments) == 0:
+        if message.channel.id == int(os.getenv('QUOTES_CHANNEL_ID')) and len(message.attachments) == 0:
             await message.delete()
-        with engine.begin() as cnx:
-            cnx.execute(text("INSERT INTO messages(id, type, timestamp, timestampEdited, isPinned, content, author_id, "
+        with bot_engine.begin() as cnx:
+            cnx.execute(text("INSERT IGNORE INTO messages(message_id, type, timestamp, timestampEdited, isPinned, content, author_id, "
                              "channel_id, attachments, embeds, stickers, mentions) "
                              "VALUES(:id, :type, :created, :edited, :pinned, :content, :author, :channel, :attachments, :embeds, :stickers, :mentions)"),
                         {'id': message.id, 'type': message.type, 'created': message.created_at,
@@ -223,23 +228,23 @@ def run_bot(bot_connection_string, garage_connection_string, token):
         is_toxic = any(elem in message.content.lower() for elem in toxic_words)
         is_racist = any(elem in message.content.lower() for elem in racist_words)
         if is_toxic and is_racist:
-            with engine.begin() as cnx:
+            with bot_engine.begin() as cnx:
                 cnx.execute(text("UPDATE messages_count SET `all` = `all` + 1, all_24 = all_24 + 1, toxic = toxic + 1, "
                                  "toxic_24 = toxic_24 + 1, racism = racism + 1, racism_24 = racism_24 + 1 WHERE author_id = :id"),
                             {'id': message.author.id})
         elif is_toxic and not is_racist:
-            with engine.begin() as cnx:
+            with bot_engine.begin() as cnx:
                 cnx.execute(text("UPDATE messages_count SET `all` = `all` + 1, all_24 = all_24 + 1, toxic = toxic + 1, "
                                  "toxic_24 = toxic_24 + 1 WHERE author_id = :id"),
                             {'id': message.author.id})
         elif not is_toxic and is_racist:
-            with engine.begin() as cnx:
+            with bot_engine.begin() as cnx:
                 cnx.execute(
                     text("UPDATE messages_count SET `all` = `all` + 1, all_24 = all_24 + 1, racism = racism + 1, "
                          "racism_24 = racism_24 + 1 WHERE author_id = :id"),
                     {'id': message.author.id})
         else:
-            with engine.begin() as cnx:
+            with bot_engine.begin() as cnx:
                 cnx.execute(
                     text("UPDATE messages_count SET `all` = `all` + 1, all_24 = all_24 + 1 WHERE author_id = :id"),
                     {'id': message.author.id})
@@ -247,20 +252,20 @@ def run_bot(bot_connection_string, garage_connection_string, token):
             if message.author.id not in admins:
                 await message.delete()
                 await message.channel.send(
-                    f'{message.author.mention}, wysyłanie zaproszeń jest zabronione na tym serwerze')
+                    f'{message.author.mention}, wysyłanie zaproszeń jest zabronione na tym serwerze.')
 
         await bot.process_commands(message)
 
     @bot.event
     async def on_message_edit(before, after):
         if before.author.id not in bots and after.embeds == []:
-            with engine.begin() as cnx:
+            with bot_engine.begin() as cnx:
                 cnx.execute(text("UPDATE messages SET content = :new, attachments = :attachments, embeds = :embeds, "
                                  "stickers = :stickers, mentions = :mentions WHERE id = :id"),
                             {'new': after.content, 'attachments': bool(after.attachments), 'embeds': bool(after.embeds),
                              'stickers': bool(after.stickers), 'mentions': bool(after.mentions), 'id': after.id})
 
-            bin_channel = bot.get_channel(734535036338176021)
+            bin_channel = bot.get_channel(int(os.getenv('BIN_CHANNEL_ID')))
             await bin_channel.send(f"*Edytowana wiadomość użytkownika **{before.author.name}** *\n"
                                    f"Stara wersja: {before.content}\n"
                                    f"Nowa wersja: {after.content}\n"
@@ -269,28 +274,28 @@ def run_bot(bot_connection_string, garage_connection_string, token):
     @bot.event
     async def on_message_delete(message):
         if message.author.id not in bots:
-            with engine.begin() as cnx:
-                cnx.execute(text("DELETE FROM messages WHERE id = :id"), {'id': message.id})
+            with bot_engine.begin() as cnx:
+                cnx.execute(text("DELETE FROM messages WHERE message_id = :id"), {'id': message.id})
         is_toxic = any(elem in message.content.lower() for elem in toxic_words)
         is_racist = any(elem in message.content.lower() for elem in racist_words)
         if is_toxic and is_racist:
-            with engine.begin() as cnx:
+            with bot_engine.begin() as cnx:
                 cnx.execute(text("UPDATE messages_count SET `all` = `all` - 1, all_24 = all_24 - 1, toxic = toxic - 1, "
                                  "toxic_24 = toxic_24 - 1, racism = racism - 1, racism_24 = racism_24 - 1 WHERE author_id = :id"),
                             {'id': message.author.id})
         elif is_toxic and not is_racist:
-            with engine.begin() as cnx:
+            with bot_engine.begin() as cnx:
                 cnx.execute(text("UPDATE messages_count SET `all` = `all` - 1, all_24 = all_24 - 1, toxic = toxic - 1, "
                                  "toxic_24 = toxic_24 - 1 WHERE author_id = :id"),
                             {'id': message.author.id})
         elif not is_toxic and is_racist:
-            with engine.begin() as cnx:
+            with bot_engine.begin() as cnx:
                 cnx.execute(
                     text("UPDATE messages_count SET `all` = `all` - 1, all_24 = all_24 - 1, racism = racism - 1, "
                          "racism_24 = racism_24 - 1 WHERE author_id = :id"),
                     {'id': message.author.id})
         else:
-            with engine.begin() as cnx:
+            with bot_engine.begin() as cnx:
                 cnx.execute(
                     text("UPDATE messages_count SET `all` = `all` - 1, all_24 = all_24 - 1 WHERE author_id = :id"),
                     {'id': message.author.id})
@@ -303,8 +308,8 @@ def run_bot(bot_connection_string, garage_connection_string, token):
         channel = bot.get_channel(payload.channel_id)
         message = await channel.fetch_message(payload.message_id)
 
-        with engine.begin() as cnx:
-            cnx.execute(text("INSERT INTO reactions(message_id, reaction_id, reacting_user_id, author_id) "
+        with bot_engine.begin() as cnx:
+            cnx.execute(text("INSERT IGNORE INTO reactions(message_id, reaction_id, reacting_user_id, author_id) "
                              "VALUES(:message_id, :reaction_id, :r_user_id, :author_id)"),
                         {'message_id': payload.message_id, 'reaction_id': payload.emoji.id,
                          'r_user_id': payload.user_id,
@@ -319,7 +324,7 @@ def run_bot(bot_connection_string, garage_connection_string, token):
         channel = bot.get_channel(payload.channel_id)
         message = await channel.fetch_message(payload.message_id)
 
-        with engine.begin() as cnx:
+        with bot_engine.begin() as cnx:
             cnx.execute(text("DELETE FROM reactions WHERE message_id = :message_id AND reaction_id = :reaction_id "
                              "AND reacting_user_id = :r_user_id AND author_id = :author_id"),
                         {'message_id': payload.message_id, 'reaction_id': payload.emoji.id,
@@ -330,7 +335,7 @@ def run_bot(bot_connection_string, garage_connection_string, token):
             cnx.execute(text("UPDATE messages_count SET reacted = reacted - 1 WHERE author_id = :id;"),
                         {'id': message.author.id})
 
-        bin_channel = bot.get_channel(734535036338176021)
+        bin_channel = bot.get_channel(int(os.getenv('BIN_CHANNEL_ID')))
         await bin_channel.send(f"Usunięta reakcja <:{payload.emoji.name}:{payload.emoji.id}> użytkownika "
                                f"**{bot.get_user(payload.user_id).name}** do wiadomości {message.jump_url}")
 
@@ -341,11 +346,11 @@ def run_bot(bot_connection_string, garage_connection_string, token):
         if not user:
             user = ctx.author
         if user.id not in bots:
-            cursor.execute("SELECT all_24 FROM messages_count WHERE author_id = " + str(user.id))
-            total_count = cursor.fetchone()[0]
-            cursor.execute("SELECT toxic_24 FROM messages_count WHERE author_id = " + str(user.id))
-            toxic_count = cursor.fetchone()[0]
-            connection.commit()
+            bot_cursor.execute("SELECT all_24 FROM messages_count WHERE author_id = " + str(user.id))
+            total_count = bot_cursor.fetchone()[0]
+            bot_cursor.execute("SELECT toxic_24 FROM messages_count WHERE author_id = " + str(user.id))
+            toxic_count = bot_cursor.fetchone()[0]
+            bot_connection.commit()
 
             if total_count > 100:
                 if toxic_count > 10:
@@ -386,9 +391,12 @@ def run_bot(bot_connection_string, garage_connection_string, token):
                  '**!help** - zbiór dostępnych komend\n'
                  '**!facebook | fb** - link do Facebooka\n'
                  '**!twitch | tt** - link do Twitcha\n'
-                 '**!youtube | yt** - link do YouTube\n\n'
-                 '**!twitter | x** - link do X/Twittera\n\n'
-                 '**!instagram | ig** - link do Instagrama\n\n'
+                 '**!youtube | yt** - link do YouTube\n'
+                 '**!twitter | x** - link do X/Twittera\n'
+                 '**!instagram | ig** - link do Instagrama\n'
+                 '**!formularz-f1** - formularz zgłoszeniowy incydentów F1\n'
+                 '**!formularz-lmu** - formularz zgłoszeniowy incydentów LMU\n\n'
+                 '### Opcje:\n'
                  '**[]** - opcjonalny argument\n'
                  '**|** - alias')
         embed = discord.Embed(
@@ -418,23 +426,33 @@ def run_bot(bot_connection_string, garage_connection_string, token):
     async def get_ig(ctx):
         await ctx.reply('https://www.instagram.com/SimSprintSeries')
 
+    @bot.command(name='formularz_f1')
+    async def get_ig(ctx):
+        await ctx.reply('https://www.simss.pl/incydenty')
+
+    @bot.command(name='formularz_lmu')
+    async def get_ig(ctx):
+        await ctx.reply('https://forms.gle/9NMeUaAKuD8qxc5M7')
+
     @bot.command(name='first')
     async def get_first_message(ctx, user: discord.User = False):
         if not user:
             user = ctx.author
-        cursor.execute(
-            "SELECT id FROM messages WHERE author_id = " + str(user.id) + " AND type NOT LIKE 'GuildMemberJoin' "
-                                                                          "AND is_active_channel = 1 "
-                                                                          "ORDER BY DATE(timestamp) LIMIT 1")
+        bot_cursor.execute(
+            """SELECT message_id FROM messages m LEFT JOIN channels c ON m.channel_id = c.id 
+                        WHERE m.author_id = %s 
+                        AND m.type NOT LIKE 'GuildMemberJoin' 
+                        AND c.is_active = 1 
+                        ORDER BY DATE(m.timestamp) LIMIT 1""", str(user.id))
         try:
-            message_id = cursor.fetchone()[0]
-            cursor.execute("SELECT channel_id FROM messages WHERE id = " + str(message_id))
-            channel_id = cursor.fetchone()[0]
+            message_id = bot_cursor.fetchone()[0]
+            bot_cursor.execute("SELECT channel_id FROM messages WHERE message_id = %s", message_id)
+            channel_id = bot_cursor.fetchone()[0]
             await ctx.reply(f"Pierwsza wiadomość użytkownika **{user.name}**: "
                             f"https://discord.com/channels/{ctx.guild.id}/{channel_id}/{message_id}")
         except TypeError:
             await ctx.reply(f"Użytkownik **{user.name}** nie napisał żadnej wiadomości na tym serwerze")
-        connection.commit()
+        bot_connection.commit()
 
     @get_first_message.error
     async def info_error(ctx, error):
@@ -445,18 +463,19 @@ def run_bot(bot_connection_string, garage_connection_string, token):
     async def get_best_message(ctx, user: discord.User = False):
         if not user:
             user = ctx.author
-        cursor.execute("SELECT r.message_id FROM reactions r LEFT JOIN messages m ON r.message_id = m.id "
-                       "WHERE r.author_id = " + str(user.id) + " AND m.is_active_channel = 1 AND r.reaction_id != '' "
-                       "GROUP BY r.message_id, r.reaction_id ORDER BY COUNT(*) DESC LIMIT 1")
+        bot_cursor.execute("SELECT r.message_id FROM reactions r "
+                           "LEFT JOIN messages m ON r.message_id = m.message_id "
+                           "WHERE r.author_id = %s AND c.is_active = 1 AND r.reaction_id != '' "
+                           "GROUP BY r.message_id, r.reaction_id ORDER BY COUNT(*) DESC LIMIT 1", str(user.id))
         try:
-            message_id = cursor.fetchone()[0]
-            cursor.execute("SELECT channel_id FROM messages WHERE id = " + str(message_id))
-            channel_id = cursor.fetchone()[0]
+            message_id = bot_cursor.fetchone()[0]
+            bot_cursor.execute("SELECT channel_id FROM messages WHERE id = %s", str(message_id))
+            channel_id = bot_cursor.fetchone()[0]
             await ctx.reply(f"Wiadomość użytkownika **{user.name}** z największą liczbą jednej reakcji: "
                             f"https://discord.com/channels/{ctx.guild.id}/{channel_id}/{message_id}")
         except TypeError:
             await ctx.reply(f"Użytkownik **{user.name}** nie napisał żadnej wiadomości na tym serwerze")
-        connection.commit()
+        bot_connection.commit()
 
     @get_best_message.error
     async def info_error(ctx, error):
@@ -467,18 +486,20 @@ def run_bot(bot_connection_string, garage_connection_string, token):
     async def get_best_message_all(ctx, user: discord.User = False):
         if not user:
             user = ctx.author
-        cursor.execute("SELECT r.message_id FROM reactions r LEFT JOIN messages m ON r.message_id = m.id "
-                       "WHERE r.author_id = " + str(user.id) + " AND m.is_active_channel = 1 "
-                       "GROUP BY r.message_id ORDER BY COUNT(*) DESC LIMIT 1")
+        bot_cursor.execute("SELECT r.message_id FROM reactions r "
+                           "LEFT JOIN messages m ON r.message_id = m.message_id "
+                           "LEFT JOIN channels c ON m.channel_id = c.id "
+                           "WHERE r.author_id = %s AND c.is_active = 1 "
+                           "GROUP BY r.message_id ORDER BY COUNT(*) DESC LIMIT 1", str(user.id))
         try:
-            message_id = cursor.fetchone()[0]
-            cursor.execute("SELECT channel_id FROM messages WHERE id = " + str(message_id))
-            channel_id = cursor.fetchone()[0]
+            message_id = bot_cursor.fetchone()[0]
+            bot_cursor.execute("SELECT channel_id FROM messages WHERE id = %s", str(message_id))
+            channel_id = bot_cursor.fetchone()[0]
             await ctx.reply(f"Wiadomość użytkownika **{user.name}** z największą liczbą wszystkich reakcji: "
                             f"https://discord.com/channels/{ctx.guild.id}/{channel_id}/{message_id}")
         except TypeError:
             await ctx.reply(f"Użytkownik **{user.name}** nie napisał żadnej wiadomości na tym serwerze")
-        connection.commit()
+        bot_connection.commit()
 
     @get_best_message_all.error
     async def info_error(ctx, error):
@@ -493,13 +514,13 @@ def run_bot(bot_connection_string, garage_connection_string, token):
     async def get_stats(ctx, user: discord.User = False):
         if not user:
             user = ctx.author
-        cursor.execute(
+        bot_cursor.execute(
             "SELECT * FROM (SELECT `all`, reaction, reacted, reacted/`all`, rank() over(order by `all` desc) as rank_all, "
             "rank() over(order by reaction desc) as rank_reactions, rank() over(order by reacted desc) "
             "as rank_reacted, rank() over(order by reacted/`all` desc) as ratio, author_id FROM messages_count) "
-            "as t WHERE author_id = " + str(user.id))
-        result = cursor.fetchone()
-        connection.commit()
+            "as t WHERE author_id = %s", str(user.id))
+        result = bot_cursor.fetchone()
+        bot_connection.commit()
         final = (f"Liczba wiadomości: {result[0]} ({result[4]}.)\n"
                  f"Liczba dodanych reakcji: {result[1]} ({result[5]}.)\n"
                  f"Liczba otrzymanych reakcji: {result[2]} ({result[6]}.)\n"
@@ -518,9 +539,9 @@ def run_bot(bot_connection_string, garage_connection_string, token):
 
     @bot.command(name='messages')
     async def get_stats(ctx):
-        cursor.execute("SELECT author_id, `all` FROM messages_count ORDER BY `all` DESC LIMIT 10")
-        result = cursor.fetchall()
-        connection.commit()
+        bot_cursor.execute("SELECT author_id, `all` FROM messages_count ORDER BY `all` DESC LIMIT 10")
+        result = bot_cursor.fetchall()
+        bot_connection.commit()
         final = ''
         for i in range(len(result)):
             try:
@@ -538,13 +559,12 @@ def run_bot(bot_connection_string, garage_connection_string, token):
             description=final
         )
         await ctx.reply(embed=embed)
-        # await ctx.reply('Najwięcej wiadomości na serwerze (tylko otwarte i istniejące kanały):\n' + final)
 
     @bot.command(name='reactions')
     async def get_reactions(ctx):
-        cursor.execute("SELECT author_id, reaction FROM messages_count ORDER BY reaction DESC LIMIT 10")
-        result = cursor.fetchall()
-        connection.commit()
+        bot_cursor.execute("SELECT author_id, reaction FROM messages_count ORDER BY reaction DESC LIMIT 10")
+        result = bot_cursor.fetchall()
+        bot_connection.commit()
         final = ''
         for i in range(len(result)):
             try:
@@ -565,9 +585,9 @@ def run_bot(bot_connection_string, garage_connection_string, token):
 
     @bot.command(name='reacted')
     async def get_reacted(ctx):
-        cursor.execute("SELECT author_id, reacted FROM messages_count ORDER BY reacted DESC LIMIT 10")
-        result = cursor.fetchall()
-        connection.commit()
+        bot_cursor.execute("SELECT author_id, reacted FROM messages_count ORDER BY reacted DESC LIMIT 10")
+        result = bot_cursor.fetchall()
+        bot_connection.commit()
         final = ''
         for i in range(len(result)):
             try:
@@ -586,79 +606,70 @@ def run_bot(bot_connection_string, garage_connection_string, token):
         )
         await ctx.reply(embed=embed)
 
-    # ---------------------- Attendance Buttons ----------------------
-    class AttendanceView(discord.ui.View):
-        def __init__(self, event_id: int):
-            super().__init__(timeout=None)
-            self.discord_event_id = event_id
-
-        @discord.ui.button(label="✓ Obecność", style=discord.ButtonStyle.success)
-        async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
-            await self.update_attendance(interaction, "accepted")
-
-        @discord.ui.button(label="✗ Nieobecność", style=discord.ButtonStyle.danger)
-        async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
-            await self.update_attendance(interaction, "declined")
-
-        @discord.ui.button(label="? Niepewność", style=discord.ButtonStyle.primary)
-        async def tentative(self, interaction: discord.Interaction, button: discord.ui.Button):
-            await self.update_attendance(interaction, "tentative")
-
-        # --- Save selection and update embed ---
-        async def update_attendance(self, interaction, status):
-            garage_engine = create_engine(garage_connection_string)
-            garage_connection = garage_engine.raw_connection()
-            garage_cursor = garage_connection.cursor()
-
-            garage_cursor.execute("""
-                INSERT INTO presence (discord_bot_events_id, driver_id, status, timestamp)
-                VALUES (%s, %s, %s, current_date)
-                ON DUPLICATE KEY UPDATE status=%s
-            """, (self.discord_event_id, interaction.user.id, status, status))
-
-            garage_connection.commit()
-            garage_cursor.close()
-            garage_connection.close()
-
-            await interaction.response.send_message(f"Zgłoszono **{status}**!", ephemeral=True)
-            await update_event_embed(self.discord_event_id, interaction.message)
-
     # ---------------------- Generate Embed ----------------------
-    def build_embed(discord_event_id):
+    def build_embed(event_id):
         garage_engine = create_engine(garage_connection_string)
         garage_connection = garage_engine.raw_connection()
         garage_cursor = garage_connection.cursor()
 
-        garage_cursor.execute("SELECT * FROM discord_bot_events WHERE id=%s", (discord_event_id,))
+        garage_cursor.execute("""SELECT e.id, e.name, l.id, l.name
+                                          FROM event e
+                                          LEFT JOIN league l ON e.league_id = l.id
+                                          WHERE e.id = %s AND e.deleted <> 1;""", event_id)
         event = garage_cursor.fetchone()
 
-        garage_cursor.execute("SELECT * FROM presence WHERE discord_bot_events_id=%s", (discord_event_id,))
+        garage_cursor.execute("""SELECT p.is_present, du.id, t.name, t.colour,
+                                            IF(dl.id IS NOT NULL AND t.id IS NOT NULL, 1, 0) as isAssigned, l.id, t.team_emoji
+                                          FROM presence p
+                                          LEFT JOIN event e ON p.event_id = e.id
+                                          LEFT JOIN league l ON e.league_id = l.id
+                                          LEFT JOIN driver d ON p.driver_id = d.id
+                                          LEFT JOIN discord_user du ON d.discord_user_id = du.id
+                                          LEFT JOIN driver_leagues dl ON  dl.drivers_id = d.id AND dl.leagues_id = l.id AND dl.deleted <> 1
+                                          LEFT JOIN team t ON dl.team_id = t.id AND t.deleted <> 1 AND t.name <> 'Rezerwa'
+                                          WHERE p.event_id = %s AND p.deleted <> 1;""", event_id)
         rows = garage_cursor.fetchall()
 
-        garage_connection.close()
+        garage_connection.commit()
 
-        accepted = [f"<@{r[4]}>" for r in rows if r[2] == "accepted"]
-        declined = [f"<@{r[4]}>" for r in rows if r[2] == "declined"]
-        tentative = [f"<@{r[4]}>" for r in rows if r[2] == "tentative"]
+        league_ids = set([r[5] for r in rows])
+
+        placeholders = ", ".join(str(l_id) for l_id in league_ids)
+        garage_cursor.execute("SELECT t.name, t.team_emoji FROM team t "
+                              "LEFT JOIN game g ON t.game_id = g.id "
+                              "LEFT JOIN league l ON g.id = l.game_id WHERE l.id = %s AND t.name <> 'Rezerwa'", placeholders)
+        teams = [x for x in garage_cursor.fetchall()]
 
         embed = discord.Embed(
-            title=event[1],
-            description=event[2],
+            title=f"{event[1]} - {event[3]}",
+            description=f"Zgłoś obecność lub nieobecność na stronie {os.getenv('DOMAIN_NAME')}/season/{event[2]}/event/{event[0]}",
             color=discord.Color.green(),
         )
-        embed.add_field(name=f"🟩 Obecność ({len(accepted)})", value="\n".join(accepted) or "—", inline=True)
-        embed.add_field(name=f"🟥 Nieobecność ({len(declined)})", value="\n".join(declined) or "—", inline=True)
-        embed.add_field(name=f"🟦 Niepewność ({len(tentative)})", value="\n".join(tentative) or "—", inline=True)
+
+        if teams:
+            for t in teams:
+                field = [f"<@{r[1]}>" for r in rows if r[0] == 1 and r[4] == 1 and r[2] == t[0]]
+                embed.add_field(name=f"{t[1]} {t[0]} ({len(field)})", value="\n".join(field) or "—", inline=True)
+        else:
+            field = [f"<@{r[1]}>" for r in rows if r[0] == 1 and r[4] == 1]
+            embed.add_field(name=f"✅ Obecność ({len(field)})", value="\n".join(field) or "—", inline=True)
+        declined = [f"<@{r[1]}>" for r in rows if r[0] == 0 and r[4] == 1]
+        embed.add_field(name=f"❌ Nieobecność ({len(declined)})", value="\n".join(declined) or "—", inline=True)
+        reserve = [f"<@{r[1]}>" for r in rows if r[0] == 1 and r[4] == 0]
+        embed.add_field(name=f"🟣 Rezerwa ({len(reserve)})", value="\n".join(reserve) or "—", inline=True)
 
         return embed
 
-    # ---------------------- Update Embed After User Click ----------------------
-    async def update_event_embed(discord_event_id, message):
-        embed = build_embed(discord_event_id)
-        await message.edit(embed=embed)
+    async def update_presence_embed(channel, message_id, event_id):
+        try:
+            message = await channel.fetch_message(message_id)
+            embed = build_embed(event_id)
+            await message.edit(embed=embed)
+        except discord.NotFound:
+            pass
 
     # ---------------------- Scheduled Task ----------------------
-    @tasks.loop(minutes=1)
+    @tasks.loop(seconds=30)
     async def event_checker():
         garage_engine = create_engine(garage_connection_string)
         garage_connection = garage_engine.raw_connection()
@@ -666,25 +677,93 @@ def run_bot(bot_connection_string, garage_connection_string, token):
 
         # Find events that are 10 hours away and not posted yet
         garage_cursor.execute("""
-            SELECT * FROM discord_bot_events dbe
+            SELECT dbe.id, e.id, l.send_post_channel_id, l.discord_group_id, dbe.message_id FROM discord_bot_events dbe
             LEFT JOIN event e ON dbe.event_id = e.id
-            WHERE dbe.posted = 0 AND e.start_date <= NOW() + INTERVAL 10 HOUR
+            LEFT JOIN league l ON e.league_id = l.id
+            WHERE e.start_date >= NOW()
+            AND DATE_SUB(e.start_date, INTERVAL l.send_post_hours HOUR) <= NOW();
         """)
         events = garage_cursor.fetchall()
 
-        CHANNEL_ID = 857643204958879797
-
-        channel = bot.get_channel(CHANNEL_ID)
-
         for event in events:
-            embed = build_embed(event[0])
-            view = AttendanceView(event[0])
+            channel = bot.get_channel(event[2])
 
-            await channel.send(embed=embed, view=view)
+            embed = build_embed(event[1])
 
-            garage_cursor.execute("UPDATE discord_bot_events SET posted=1 WHERE id=%s", (event[0],))
-            garage_connection.commit()
+            if event[4] is None:
+                message = await channel.send(content=f"<@&{event[3]}>", embed=embed)
+                garage_cursor.execute("UPDATE discord_bot_events SET message_id=%s WHERE id=%s", (message.id, event[0]))
+                garage_connection.commit()
+            else:
+                message = await channel.fetch_message(event[4])
+                asyncio.create_task(update_presence_embed(channel, message.id, event[1]))
 
-        garage_connection.close()
+        garage_connection.commit()
+
+    async def schedule_reminders():
+        garage_engine = create_engine(garage_connection_string)
+        garage_connection = garage_engine.raw_connection()
+        garage_cursor = garage_connection.cursor()
+
+        garage_cursor.execute("""
+            SELECT e.id, e.name, l.id, l.name, emb.value, DATE_SUB(e.start_date, INTERVAL emb.value HOUR) AS reminder_time 
+            FROM discord_bot_events dbe 
+            LEFT JOIN event e on dbe.event_id = e.id 
+            LEFT JOIN league l on e.league_id = l.id 
+            RIGHT JOIN event_mention_before emb on l.id = emb.league_id 
+            WHERE DATE_SUB(e.start_date, INTERVAL emb.value HOUR) >= NOW();
+        """)
+        reminders = garage_cursor.fetchall()
+
+        garage_connection.commit()
+
+        for r in reminders:
+            scheduler.add_job(
+                send_reminder,
+                "date",
+                run_date=r[5],
+                args=[r[0], r[1], r[2], r[3], r[4]],
+                id=f"{r[1]}_{r[4]}",
+                replace_existing=True,
+            )
+
+    async def send_reminder(event_id, event_name, league_id, league_name, hours_before):
+        garage_engine = create_engine(garage_connection_string)
+        garage_connection = garage_engine.raw_connection()
+        garage_cursor = garage_connection.cursor()
+
+        garage_cursor.execute("""SELECT du.id FROM driver_leagues dl
+                                            INNER JOIN team t ON dl.team_id = t.id AND t.deleted <> 1 AND t.name <> 'Rezerwa'
+                                            INNER JOIN driver d ON dl.drivers_id = d.id
+                                            INNER JOIN discord_user du ON d.discord_user_id = du.id
+                                            WHERE dl.leagues_id = %s AND d.id NOT IN
+                                            (SELECT d.id FROM presence p
+                                            LEFT JOIN event e ON p.event_id = e.id
+                                            LEFT JOIN driver d ON p.driver_id = d.id
+                                            LEFT JOIN league l ON e.league_id = l.id
+                                            LEFT JOIN driver_leagues dl ON dl.drivers_id = d.id AND dl.leagues_id = l.id
+                                            INNER JOIN team t ON dl.team_id = t.id AND t.deleted <> 1 AND t.name <> 'Rezerwa'
+                                            WHERE e.id = %s AND p.deleted <> 1);""", (league_id, event_id))
+        not_selected = (x[0] for x in garage_cursor.fetchall())
+
+        garage_connection.commit()
+
+        for discord_id in not_selected:
+            msg = f"{event_name} w lidze {league_name} rozpoczyna się za {hours_text(hours_before)}. Zgłoś obecność lub nieobecność na stronie: {os.getenv('DOMAIN_NAME')}/season/{league_id}/event/{event_id}"
+            user = bot.get_user(discord_id)
+            if user:
+                await user.send(msg)
+
+    def hours_text(hours):
+        if hours == 1:
+            return '1 godzinę'
+        elif 2 <= hours % 10 <= 4 and not 12 <= hours % 100 <= 14:
+            return f"{hours} godziny"
+        return f"{hours} godzin"
+
+    def create_connection(connection_string):
+        engine = create_engine(connection_string)
+        connection = engine.raw_connection()
+        return connection.cursor()
 
     bot.run(token)
