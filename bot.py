@@ -2,28 +2,18 @@ import asyncio
 import os
 import random
 import re
+from datetime import timedelta, datetime, timezone
 
-import gspread
 import pandas as pd
 
 import discord
 from discord import MessageType
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
-from oauth2client.service_account import ServiceAccountCredentials
 from sqlalchemy import create_engine, text
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 load_dotenv()
-
-def authenticate_google_sheets():
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-
-    creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
-
-    client = gspread.authorize(creds)
-    return client
-
 
 def run_bot(bot_connection_string, garage_connection_string, token):
     intents = discord.Intents.all()
@@ -40,8 +30,6 @@ def run_bot(bot_connection_string, garage_connection_string, token):
 
     bots = [968851237405597717, 475744554910351370, 235148962103951360, 762217899355013120, 159985870458322944,
             1311665961027244084, 734535151899639910, 1311665961027244084, 1211781489931452447]
-
-    command_channels = [985565935849070702, 799608563566772234, 857643204958879797]
 
     gifs = [
         'https://media.discordapp.net/attachments/902300785466040370/980959555666182194/kowalski.gif?ex=6779b4c7&is=67786347&hm=bbc24b6f3bf4f57baff91e56d2fb47f1d40c2537a9af1ff610fd3b0de3350e9f&',
@@ -68,100 +56,6 @@ def run_bot(bot_connection_string, garage_connection_string, token):
     invite_pattern = re.compile(r"discord\.gg\/[A-Za-z0-9]+|discord\.com\/invite\/[A-Za-z0-9]+")
 
     admins = [523929325171638280, 146344154887094273, 917064080366391386, 686636820196491305, 1376320417890963546, 308273688208211968, 1288993340532064338, 573780343488905221]
-
-    async def check_for_new_responses():
-        google_client = authenticate_google_sheets()
-        f1_sheet = google_client.open('Formularz zgłoszeniowy incydentów wyścigowych SSS (Odpowiedzi)').sheet1
-        f1_last_processed_row = len(f1_sheet.get_all_records())
-        acc_sheet = google_client.open('Incydenty ACC/LMU').get_worksheet(1)
-        acc_last_processed_row = len(acc_sheet.get_all_records())
-        lmu_sheet = google_client.open('Incydenty ACC/LMU').get_worksheet(0)
-        lmu_last_processed_row = len(lmu_sheet.get_all_records())
-        clips_sheet = google_client.open('Klipy (Odpowiedzi)').get_worksheet(0)
-        clips_last_processed_row = len(clips_sheet.get_all_records())
-
-        while True:
-            f1_responses = f1_sheet.get_all_records()
-            f1_new_responses = f1_responses[f1_last_processed_row:]
-            f1_last_processed_row = len(f1_responses)
-
-            if f1_new_responses:
-                for response in f1_new_responses:
-                    final = (f"Zgłaszający: {response['Zgłaszający kierowca']}\n"
-                             f"Zgłaszany: {response['Zgłaszany kierowca']}\n"
-                             f"Wyścig: {response['Wyścig']}\n"
-                             f"Split: {response['Split']}\n"
-                             f"Numer okrążenia: {response['Numer okrążenia']}\n"
-                             f"Dowód: {response['Dowód']}\n"
-                             f"Opis incydentu: {response['Opis incydentu']}")
-                    embed = discord.Embed(
-                        colour=discord.Colour.dark_green(),
-                        title=f'Zgłoszenie {str(f1_last_processed_row + 1)}',
-                        description=final
-                    )
-                    channel = bot.get_channel(int(os.getenv('F1_INCIDENTS_CHANNEL_ID')))
-                    await channel.send(embed=embed)
-
-            acc_responses = acc_sheet.get_all_records()
-            acc_new_responses = acc_responses[acc_last_processed_row:]
-            acc_last_processed_row = len(acc_responses)
-
-            if acc_new_responses:
-                for response in acc_new_responses:
-                    final = (f"Zgłaszający: {response['Kierowca zgłaszający / nr auta']}\n"
-                             f"Zgłaszany: {response['Kierowca zgłaszany / numer auta']}\n"
-                             f"Wyścig: {response['Wybierz rundę']}\n"
-                             f"Rodzaj zdarzenia: {response['Rodzaj zdarzenia']}\n"
-                             f"Dowód (link/timestamp): {response['Dowody ( Link do nagrania z incydentu/sygnatura czasowa z oficjalnej powtórki)']}\n"
-                             f"Opis incydentu: {response['Opis sytuacji']}")
-                    embed = discord.Embed(
-                        colour=discord.Colour.dark_green(),
-                        title=f'Zgłoszenie {str(acc_last_processed_row + 1)}',
-                        description=final
-                    )
-                    channel = bot.get_channel(int(os.getenv('ACC_INCIDENTS_CHANNEL_ID')))
-                    await channel.send(embed=embed)
-
-            lmu_responses = lmu_sheet.get_all_records()
-            lmu_new_responses = lmu_responses[lmu_last_processed_row:]
-            lmu_last_processed_row = len(lmu_responses)
-
-            if lmu_new_responses:
-                for response in lmu_new_responses:
-                    final = (f"Zgłaszający: {response['Kierowca zgłaszający / nr auta']}\n"
-                             f"Zgłaszany: {response['Kierowca zgłaszany / numer auta']}\n"
-                             f"Wyścig: {response['Wybierz rundę']}\n"
-                             f"Rodzaj zdarzenia: {response['Rodzaj zdarzenia']}\n"
-                             f"Dowód (link/timestamp): {response['Dowody ( Link do nagrania z incydentu)']}\n"
-                             f"Opis incydentu: {response['Opis sytuacji']}")
-                    embed = discord.Embed(
-                        colour=discord.Colour.dark_green(),
-                        title=f'Zgłoszenie {str(lmu_last_processed_row + 1)}',
-                        description=final
-                    )
-                    channel = bot.get_channel(int(os.getenv('LMU_INCIDENTS_CHANNEL_ID')))
-                    await channel.send(embed=embed)
-
-            clips_responses = clips_sheet.get_all_records()
-            clips_new_responses = clips_responses[clips_last_processed_row:]
-            clips_last_processed_row = len(clips_responses)
-
-            if clips_new_responses:
-                for response in clips_new_responses:
-                    final = (f"Nick: {response['Nick']}\n"
-                             f"Split: {response['Split']}\n"
-                             f"Wyścig: {response['Wyścig']}\n"
-                             f"Wideo: {response['Wideo']}")
-                    embed = discord.Embed(
-                        colour=discord.Colour.dark_green(),
-                        title=f'Klip {str(clips_last_processed_row + 1)}',
-                        description=final
-                    )
-                    channel = bot.get_channel(int(os.getenv('CLIPS_CHANNEL_ID')))
-                    role = discord.utils.get(channel.guild.roles, id=int(os.getenv('MARKETING_ROLE_ID')))
-                    await channel.send(role.mention, embed=embed)
-
-            await asyncio.sleep(10)
 
     @bot.event
     async def on_ready():
@@ -191,8 +85,6 @@ def run_bot(bot_connection_string, garage_connection_string, token):
                              "WHERE id IN (SELECT id FROM members_temp)"))
             cnx.execute(text("DROP TABLE members_temp"))
 
-        asyncio.create_task(check_for_new_responses())
-
         asyncio.create_task(schedule_reminders())
         scheduler.start()
 
@@ -214,6 +106,20 @@ def run_bot(bot_connection_string, garage_connection_string, token):
             await message.reply(random.choice(gifs))
         if message.channel.id == int(os.getenv('QUOTES_CHANNEL_ID')) and len(message.attachments) == 0:
             await message.delete()
+        if message.channel.id == int(os.getenv('TRAP_CHANNEL_ID')):
+            try:
+                await message.author.timeout(timedelta(minutes=int(os.getenv('TIMEOUT_MINUTES'))))
+            except discord.Forbidden:
+                print("Can't delete - missing permissions")
+            await message.author.send("Zostałeś wyciszony na godzinę na serwerze ze względu na spam. Natychmiast zmień hasło i wymuś logowanie ze wszystkich urządzeń.")
+            cutoff = datetime.now(timezone.utc) - timedelta(minutes=int(os.getenv('DELETE_MESSAGES_MINUTES')))
+            for channel in message.guild.text_channels:
+                try:
+                    async for msg in channel.history(limit=None, after=cutoff):
+                        if msg.author.id == message.author.id:
+                            await msg.delete()
+                except discord.Forbidden:
+                    continue
         with bot_engine.begin() as cnx:
             cnx.execute(text("INSERT IGNORE INTO messages(message_id, type, timestamp, timestampEdited, isPinned, content, author_id, "
                              "channel_id, attachments, embeds, stickers, mentions) "
@@ -300,7 +206,7 @@ def run_bot(bot_connection_string, garage_connection_string, token):
                     text("UPDATE messages_count SET `all` = `all` - 1, all_24 = all_24 - 1 WHERE author_id = :id"),
                     {'id': message.author.id})
 
-            bin_channel = bot.get_channel(734535036338176021)
+            bin_channel = bot.get_channel(int(os.getenv('BIN_CHANNEL_ID')))
             await bin_channel.send(f"*Usunięta wiadomość użytkownika **{message.author.name}** *\n{message.content}")
 
     @bot.event
@@ -341,7 +247,7 @@ def run_bot(bot_connection_string, garage_connection_string, token):
 
     @bot.command(name='toxic')
     async def count_toxic_messages(ctx, user: discord.User = False):
-        if ctx.channel.id not in command_channels:
+        if ctx.channel.id != int(os.getenv('COMMAND_CHANNEL_ID')):
             return
         if not user:
             user = ctx.author
@@ -376,7 +282,6 @@ def run_bot(bot_connection_string, garage_connection_string, token):
     @bot.command(name='help')
     async def get_help(ctx):
         final = ('### Kanał https://discord.com/channels/733758693971066960/985565935849070702:\n'
-                 '**!avatar [@user]** - wyświetla avatar użytkownika\n'
                  '**!best [@user]** - wyświetla wiadomość z największą liczbą pojedynczej reakcji\n'
                  '**!bestall [@user]** - wyświetla wiadomość z największą liczbą wszystkich reakcji\n'
                  '**!first [@user]** - wyświetla pierwszą wiadomość użytkownika\n'
@@ -387,7 +292,8 @@ def run_bot(bot_connection_string, garage_connection_string, token):
                  '**!toxic [@user]** - wyświetla poziom toksyczności użytkownika (procent wiadomości, '
                  'użytkownik musi mieć minimum 100 wiadomości i 10 toksycznych wiadomości na serwerze)\n\n'
                  '### Wszystkie kanały:\n'
-                 '**!czystobylo** - losowy gif z serii czysto było\n'
+                 '**!avatar [@user]** - wyświetla avatar użytkownika\n'
+                 '**!czystobylo** - losowy gif z serii "czysto było"\n'
                  '**!help** - zbiór dostępnych komend\n'
                  '**!facebook | fb** - link do Facebooka\n'
                  '**!twitch | tt** - link do Twitcha\n'
@@ -426,16 +332,18 @@ def run_bot(bot_connection_string, garage_connection_string, token):
     async def get_ig(ctx):
         await ctx.reply('https://www.instagram.com/SimSprintSeries')
 
-    @bot.command(name='formularz_f1')
+    @bot.command(name='formularz-f1')
     async def get_ig(ctx):
         await ctx.reply('https://www.simss.pl/incydenty')
 
-    @bot.command(name='formularz_lmu')
+    @bot.command(name='formularz-lmu')
     async def get_ig(ctx):
         await ctx.reply('https://forms.gle/9NMeUaAKuD8qxc5M7')
 
     @bot.command(name='first')
     async def get_first_message(ctx, user: discord.User = False):
+        if ctx.channel.id != int(os.getenv('COMMAND_CHANNEL_ID')):
+            return
         if not user:
             user = ctx.author
         bot_cursor.execute(
@@ -461,15 +369,18 @@ def run_bot(bot_connection_string, garage_connection_string, token):
 
     @bot.command(name='best')
     async def get_best_message(ctx, user: discord.User = False):
+        if ctx.channel.id != int(os.getenv('COMMAND_CHANNEL_ID')):
+            return
         if not user:
             user = ctx.author
         bot_cursor.execute("SELECT r.message_id FROM reactions r "
                            "LEFT JOIN messages m ON r.message_id = m.message_id "
+                           "LEFT JOIN channels c ON m.channel_id = c.id "
                            "WHERE r.author_id = %s AND c.is_active = 1 AND r.reaction_id != '' "
                            "GROUP BY r.message_id, r.reaction_id ORDER BY COUNT(*) DESC LIMIT 1", str(user.id))
         try:
             message_id = bot_cursor.fetchone()[0]
-            bot_cursor.execute("SELECT channel_id FROM messages WHERE id = %s", str(message_id))
+            bot_cursor.execute("SELECT channel_id FROM messages WHERE message_id = %s", message_id)
             channel_id = bot_cursor.fetchone()[0]
             await ctx.reply(f"Wiadomość użytkownika **{user.name}** z największą liczbą jednej reakcji: "
                             f"https://discord.com/channels/{ctx.guild.id}/{channel_id}/{message_id}")
@@ -484,6 +395,8 @@ def run_bot(bot_connection_string, garage_connection_string, token):
 
     @bot.command(name='bestall')
     async def get_best_message_all(ctx, user: discord.User = False):
+        if ctx.channel.id != int(os.getenv('COMMAND_CHANNEL_ID')):
+            return
         if not user:
             user = ctx.author
         bot_cursor.execute("SELECT r.message_id FROM reactions r "
@@ -493,7 +406,7 @@ def run_bot(bot_connection_string, garage_connection_string, token):
                            "GROUP BY r.message_id ORDER BY COUNT(*) DESC LIMIT 1", str(user.id))
         try:
             message_id = bot_cursor.fetchone()[0]
-            bot_cursor.execute("SELECT channel_id FROM messages WHERE id = %s", str(message_id))
+            bot_cursor.execute("SELECT channel_id FROM messages WHERE message_id = %s", message_id)
             channel_id = bot_cursor.fetchone()[0]
             await ctx.reply(f"Wiadomość użytkownika **{user.name}** z największą liczbą wszystkich reakcji: "
                             f"https://discord.com/channels/{ctx.guild.id}/{channel_id}/{message_id}")
@@ -512,6 +425,8 @@ def run_bot(bot_connection_string, garage_connection_string, token):
 
     @bot.command(name='stats')
     async def get_stats(ctx, user: discord.User = False):
+        if ctx.channel.id != int(os.getenv('COMMAND_CHANNEL_ID')):
+            return
         if not user:
             user = ctx.author
         bot_cursor.execute(
@@ -539,6 +454,8 @@ def run_bot(bot_connection_string, garage_connection_string, token):
 
     @bot.command(name='messages')
     async def get_stats(ctx):
+        if ctx.channel.id != int(os.getenv('COMMAND_CHANNEL_ID')):
+            return
         bot_cursor.execute("SELECT author_id, `all` FROM messages_count ORDER BY `all` DESC LIMIT 10")
         result = bot_cursor.fetchall()
         bot_connection.commit()
@@ -562,6 +479,8 @@ def run_bot(bot_connection_string, garage_connection_string, token):
 
     @bot.command(name='reactions')
     async def get_reactions(ctx):
+        if ctx.channel.id != int(os.getenv('COMMAND_CHANNEL_ID')):
+            return
         bot_cursor.execute("SELECT author_id, reaction FROM messages_count ORDER BY reaction DESC LIMIT 10")
         result = bot_cursor.fetchall()
         bot_connection.commit()
@@ -585,6 +504,8 @@ def run_bot(bot_connection_string, garage_connection_string, token):
 
     @bot.command(name='reacted')
     async def get_reacted(ctx):
+        if ctx.channel.id != int(os.getenv('COMMAND_CHANNEL_ID')):
+            return
         bot_cursor.execute("SELECT author_id, reacted FROM messages_count ORDER BY reacted DESC LIMIT 10")
         result = bot_cursor.fetchall()
         bot_connection.commit()
