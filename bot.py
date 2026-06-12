@@ -111,7 +111,7 @@ def run_bot(bot_connection_string, garage_connection_string, token):
                 await message.author.timeout(timedelta(minutes=int(os.getenv('TIMEOUT_MINUTES'))))
             except discord.Forbidden:
                 print("Can't delete - missing permissions")
-            await message.author.send("Zostałeś wyciszony na godzinę na serwerze ze względu na spam. Natychmiast zmień hasło i wymuś logowanie ze wszystkich urządzeń.")
+            await message.author.send("Zostałeś wyciszony na godzinę na serwerze ze względu na spam. Natychmiast zmień hasło i wymuś wylogowanie ze wszystkich urządzeń.")
             cutoff = datetime.now(timezone.utc) - timedelta(minutes=int(os.getenv('DELETE_MESSAGES_MINUTES')))
             for channel in message.guild.text_channels:
                 try:
