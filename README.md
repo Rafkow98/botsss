@@ -9,11 +9,11 @@ This bot is created for [SimSprintSeries server](https://www.simss.pl/discord).
 
 ## Starting
 
-Run those commands in your shell, in the bot's directory. The ```pip install``` command might be run only once, there is no need to run it every time
+Run those commands in your shell, in the bot's directory. The ```pip install``` command might be run only once, there is no need to run it every time. Fill an .env file with variables, generate credentials.json file [based on this instruction](https://developers.google.com/workspace/guides/create-credentials?hl=pl) (it's for Google authentication, if not needed comment out check_for_new_responses() method from bot.py) and replace the file from project.
 
 ```bash
 pip install -r requirements.txt
-python main.py [MARIADB_USER] [MARIADB_PASSWORD] [HOST] [DATABASE_NAME] [BOT_TOKEN]
+python main.py
 ```
 
 ## Functionalities
