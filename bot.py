@@ -24,9 +24,8 @@ def run_bot(bot_connection_string, garage_connection_string, token):
 
     scheduler = AsyncIOScheduler()
 
-    bot_engine = create_engine(bot_connection_string)
-    bot_connection = bot_engine.raw_connection()
-    bot_cursor = bot_connection.cursor()
+    bot_engine = create_engine(bot_connection_string, pool_pre_ping=True)
+    garage_engine = create_engine(garage_connection_string, pool_pre_ping=True)
 
     bots = [968851237405597717, 475744554910351370, 235148962103951360, 762217899355013120, 159985870458322944,
             1311665961027244084, 734535151899639910, 1311665961027244084, 1211781489931452447]
@@ -50,7 +49,6 @@ def run_bot(bot_connection_string, garage_connection_string, token):
         'https://media.discordapp.net/attachments/995375885781831730/1316888151037444116/ezgif-1-0f282c535f.gif?ex=677baa69&is=677a58e9&hm=97d3cf2c73593bbc7f71fad28b40bd8a8cbbc5a715d54e738b9999bb517572be&=&width=400&height=225']
 
     toxic_words = ['huj', 'cip', 'pierda', 'pierdo', 'dup', 'kurew', 'kurw', 'kutas', 'pizd', 'jeb', 'rucha', 'sra']
-
     racist_words = ['niger', 'nigger', 'niga', 'nyga', 'nigga', 'czarnuch', 'murzyn', 'rasis', 'rasiz']
 
     invite_pattern = re.compile(r"discord\.gg\/[A-Za-z0-9]+|discord\.com\/invite\/[A-Za-z0-9]+")
@@ -60,6 +58,7 @@ def run_bot(bot_connection_string, garage_connection_string, token):
     @bot.event
     async def on_ready():
         event_checker.start()
+
         channels_list = []
         members_list = []
         for guild in bot.guilds:
@@ -107,19 +106,15 @@ def run_bot(bot_connection_string, garage_connection_string, token):
         if message.channel.id == int(os.getenv('QUOTES_CHANNEL_ID')) and len(message.attachments) == 0:
             await message.delete()
         if message.channel.id == int(os.getenv('TRAP_CHANNEL_ID')):
+            timeout_minutes = int(os.getenv('TIMEOUT_MINUTES'))
+            delete_minutes = int(os.getenv('DELETE_MESSAGES_MINUTES'))
+            cutoff = datetime.now(timezone.utc) - timedelta(minutes=delete_minutes)
             try:
-                await message.author.timeout(timedelta(minutes=int(os.getenv('TIMEOUT_MINUTES'))))
+                await message.author.timeout(timedelta(minutes=timeout_minutes))
             except discord.Forbidden:
-                print("Can't delete - missing permissions")
-            await message.author.send("Zostałeś wyciszony na godzinę na serwerze ze względu na spam. Natychmiast zmień hasło i wymuś wylogowanie ze wszystkich urządzeń.")
-            cutoff = datetime.now(timezone.utc) - timedelta(minutes=int(os.getenv('DELETE_MESSAGES_MINUTES')))
-            for channel in message.guild.text_channels:
-                try:
-                    async for msg in channel.history(limit=None, after=cutoff):
-                        if msg.author.id == message.author.id:
-                            await msg.delete()
-                except discord.Forbidden:
-                    continue
+                print("Can't timeout - missing permissions")
+            asyncio.create_task(purge_user_messages(message.guild, message.author, cutoff))
+            asyncio.create_task(send_warning_dm(message.author))
         with bot_engine.begin() as cnx:
             cnx.execute(text("INSERT IGNORE INTO messages(message_id, type, timestamp, timestampEdited, isPinned, content, author_id, "
                              "channel_id, attachments, embeds, stickers, mentions) "
@@ -131,6 +126,7 @@ def run_bot(bot_connection_string, garage_connection_string, token):
                          'attachments': bool(message.attachments), 'embeds': bool(message.embeds),
                          'stickers': bool(message.stickers),
                          'mentions': bool(message.mentions)})
+
         is_toxic = any(elem in message.content.lower() for elem in toxic_words)
         is_racist = any(elem in message.content.lower() for elem in racist_words)
         if is_toxic and is_racist:
@@ -154,6 +150,7 @@ def run_bot(bot_connection_string, garage_connection_string, token):
                 cnx.execute(
                     text("UPDATE messages_count SET `all` = `all` + 1, all_24 = all_24 + 1 WHERE author_id = :id"),
                     {'id': message.author.id})
+
         if invite_pattern.search(message.content):
             if message.author.id not in admins:
                 await message.delete()
@@ -252,11 +249,12 @@ def run_bot(bot_connection_string, garage_connection_string, token):
         if not user:
             user = ctx.author
         if user.id not in bots:
-            bot_cursor.execute("SELECT all_24 FROM messages_count WHERE author_id = " + str(user.id))
-            total_count = bot_cursor.fetchone()[0]
-            bot_cursor.execute("SELECT toxic_24 FROM messages_count WHERE author_id = " + str(user.id))
-            toxic_count = bot_cursor.fetchone()[0]
-            bot_connection.commit()
+            with bot_engine.connect() as cnx:
+                row = cnx.execute(
+                    text("SELECT all_24, toxic_24 FROM messages_count WHERE author_id = :id"),
+                    {'id': user.id}
+                ).fetchone()
+            total_count, toxic_count = row[0], row[1]
 
             if total_count > 100:
                 if toxic_count > 10:
@@ -305,6 +303,7 @@ def run_bot(bot_connection_string, garage_connection_string, token):
                  '### Opcje:\n'
                  '**[]** - opcjonalny argument\n'
                  '**|** - alias')
+
         embed = discord.Embed(
             colour=discord.Colour.dark_green(),
             title='Dostępne komendy',
@@ -346,21 +345,25 @@ def run_bot(bot_connection_string, garage_connection_string, token):
             return
         if not user:
             user = ctx.author
-        bot_cursor.execute(
-            """SELECT message_id FROM messages m LEFT JOIN channels c ON m.channel_id = c.id 
-                        WHERE m.author_id = %s 
-                        AND m.type NOT LIKE 'GuildMemberJoin' 
-                        AND c.is_active = 1 
-                        ORDER BY DATE(m.timestamp) LIMIT 1""", str(user.id))
+        with bot_engine.connect() as cnx:
+            row = cnx.execute(text(
+                """SELECT message_id FROM messages m LEFT JOIN channels c ON m.channel_id = c.id
+               WHERE m.author_id = :id
+               AND m.type NOT LIKE 'GuildMemberJoin'
+               AND c.is_active = 1
+               ORDER BY DATE(m.timestamp) LIMIT 1"""), {'id': user.id}).fetchone()
+
         try:
-            message_id = bot_cursor.fetchone()[0]
-            bot_cursor.execute("SELECT channel_id FROM messages WHERE message_id = %s", message_id)
-            channel_id = bot_cursor.fetchone()[0]
+            message_id = row[0]
+            with bot_engine.connect() as cnx:
+                channel_id = cnx.execute(
+                    text("SELECT channel_id FROM messages WHERE message_id = :mid"),
+                    {'mid': message_id}
+                ).fetchone()[0]
             await ctx.reply(f"Pierwsza wiadomość użytkownika **{user.name}**: "
                             f"https://discord.com/channels/{ctx.guild.id}/{channel_id}/{message_id}")
         except TypeError:
             await ctx.reply(f"Użytkownik **{user.name}** nie napisał żadnej wiadomości na tym serwerze")
-        bot_connection.commit()
 
     @get_first_message.error
     async def info_error(ctx, error):
@@ -373,20 +376,26 @@ def run_bot(bot_connection_string, garage_connection_string, token):
             return
         if not user:
             user = ctx.author
-        bot_cursor.execute("SELECT r.message_id FROM reactions r "
-                           "LEFT JOIN messages m ON r.message_id = m.message_id "
-                           "LEFT JOIN channels c ON m.channel_id = c.id "
-                           "WHERE r.author_id = %s AND c.is_active = 1 AND r.reaction_id != '' "
-                           "GROUP BY r.message_id, r.reaction_id ORDER BY COUNT(*) DESC LIMIT 1", str(user.id))
+        with bot_engine.connect() as cnx:
+            row = cnx.execute(text(
+                "SELECT r.message_id FROM reactions r "
+                "LEFT JOIN messages m ON r.message_id = m.message_id "
+                "LEFT JOIN channels c ON m.channel_id = c.id "
+                "WHERE r.author_id = :id AND c.is_active = 1 AND r.reaction_id != '' "
+                "GROUP BY r.message_id, r.reaction_id ORDER BY COUNT(*) DESC LIMIT 1"
+            ), {'id': user.id}).fetchone()
+
         try:
-            message_id = bot_cursor.fetchone()[0]
-            bot_cursor.execute("SELECT channel_id FROM messages WHERE message_id = %s", message_id)
-            channel_id = bot_cursor.fetchone()[0]
+            message_id = row[0]
+            with bot_engine.connect() as cnx:
+                channel_id = cnx.execute(
+                    text("SELECT channel_id FROM messages WHERE message_id = :mid"),
+                    {'mid': message_id}
+                ).fetchone()[0]
             await ctx.reply(f"Wiadomość użytkownika **{user.name}** z największą liczbą jednej reakcji: "
                             f"https://discord.com/channels/{ctx.guild.id}/{channel_id}/{message_id}")
         except TypeError:
             await ctx.reply(f"Użytkownik **{user.name}** nie napisał żadnej wiadomości na tym serwerze")
-        bot_connection.commit()
 
     @get_best_message.error
     async def info_error(ctx, error):
@@ -399,20 +408,26 @@ def run_bot(bot_connection_string, garage_connection_string, token):
             return
         if not user:
             user = ctx.author
-        bot_cursor.execute("SELECT r.message_id FROM reactions r "
-                           "LEFT JOIN messages m ON r.message_id = m.message_id "
-                           "LEFT JOIN channels c ON m.channel_id = c.id "
-                           "WHERE r.author_id = %s AND c.is_active = 1 "
-                           "GROUP BY r.message_id ORDER BY COUNT(*) DESC LIMIT 1", str(user.id))
+        with bot_engine.connect() as cnx:
+            row = cnx.execute(text(
+                "SELECT r.message_id FROM reactions r "
+                "LEFT JOIN messages m ON r.message_id = m.message_id "
+                "LEFT JOIN channels c ON m.channel_id = c.id "
+                "WHERE r.author_id = :id AND c.is_active = 1 "
+                "GROUP BY r.message_id ORDER BY COUNT(*) DESC LIMIT 1"
+            ), {'id': user.id}).fetchone()
+
         try:
-            message_id = bot_cursor.fetchone()[0]
-            bot_cursor.execute("SELECT channel_id FROM messages WHERE message_id = %s", message_id)
-            channel_id = bot_cursor.fetchone()[0]
+            message_id = row[0]
+            with bot_engine.connect() as cnx:
+                channel_id = cnx.execute(
+                    text("SELECT channel_id FROM messages WHERE message_id = :mid"),
+                    {'mid': message_id}
+                ).fetchone()[0]
             await ctx.reply(f"Wiadomość użytkownika **{user.name}** z największą liczbą wszystkich reakcji: "
                             f"https://discord.com/channels/{ctx.guild.id}/{channel_id}/{message_id}")
         except TypeError:
             await ctx.reply(f"Użytkownik **{user.name}** nie napisał żadnej wiadomości na tym serwerze")
-        bot_connection.commit()
 
     @get_best_message_all.error
     async def info_error(ctx, error):
@@ -429,13 +444,13 @@ def run_bot(bot_connection_string, garage_connection_string, token):
             return
         if not user:
             user = ctx.author
-        bot_cursor.execute(
-            "SELECT * FROM (SELECT `all`, reaction, reacted, reacted/`all`, rank() over(order by `all` desc) as rank_all, "
-            "rank() over(order by reaction desc) as rank_reactions, rank() over(order by reacted desc) "
-            "as rank_reacted, rank() over(order by reacted/`all` desc) as ratio, author_id FROM messages_count) "
-            "as t WHERE author_id = %s", str(user.id))
-        result = bot_cursor.fetchone()
-        bot_connection.commit()
+        with bot_engine.connect() as cnx:
+            result = cnx.execute(text(
+                "SELECT * FROM (SELECT `all`, reaction, reacted, reacted/`all`, RANK() OVER(ORDER BY `all` DESC) AS rank_all, "
+                "RANK() OVER(ORDER BY reaction desc) AS rank_reactions, RANK() OVER(ORDER BY reacted DESC) "
+                "AS rank_reacted, RANK() OVER(ORDER BY reacted/`all` DESC) AS ratio, author_id FROM messages_count) "
+                "AS t WHERE author_id = :id"
+            ), {'id': user.id}).fetchone()
         final = (f"Liczba wiadomości: {result[0]} ({result[4]}.)\n"
                  f"Liczba dodanych reakcji: {result[1]} ({result[5]}.)\n"
                  f"Liczba otrzymanych reakcji: {result[2]} ({result[6]}.)\n"
@@ -456,20 +471,15 @@ def run_bot(bot_connection_string, garage_connection_string, token):
     async def get_stats(ctx):
         if ctx.channel.id != int(os.getenv('COMMAND_CHANNEL_ID')):
             return
-        bot_cursor.execute("SELECT author_id, `all` FROM messages_count ORDER BY `all` DESC LIMIT 10")
-        result = bot_cursor.fetchall()
-        bot_connection.commit()
+        with bot_engine.connect() as cnx:
+            result = cnx.execute(text(
+                "SELECT author_id, name, `all` FROM messages_count mc "
+                "LEFT JOIN members m ON mc.author_id = m.id "
+                "ORDER BY `all` DESC LIMIT 10"
+            )).fetchall()
         final = ''
         for i in range(len(result)):
-            try:
-                user = bot.get_user(result[i][0])
-                final += str(i) + '. ' + user.name + ': ' + str(result[i][1]) + '\n'
-            except AttributeError:
-                try:
-                    user = await bot.fetch_user(result[i][0])
-                    final += str(i) + '. ' + user.name + ': ' + str(result[i][1]) + '\n'
-                except discord.errors.NotFound:
-                    final += str(i) + '. usunięty użytkownik: ' + str(result[i][1]) + '\n'
+            final += str(i) + '. ' + str(result[i][1]) + ': ' + str(result[i][2]) + '\n'
         embed = discord.Embed(
             colour=discord.Colour.dark_green(),
             title='Najwięcej wiadomości na serwerze (tylko otwarte i istniejące kanały)',
@@ -481,20 +491,15 @@ def run_bot(bot_connection_string, garage_connection_string, token):
     async def get_reactions(ctx):
         if ctx.channel.id != int(os.getenv('COMMAND_CHANNEL_ID')):
             return
-        bot_cursor.execute("SELECT author_id, reaction FROM messages_count ORDER BY reaction DESC LIMIT 10")
-        result = bot_cursor.fetchall()
-        bot_connection.commit()
+        with bot_engine.connect() as cnx:
+            result = cnx.execute(text(
+                "SELECT author_id, name, reaction FROM messages_count mc "
+                "LEFT JOIN members m ON mc.author_id = m.id "
+                "ORDER BY reaction DESC LIMIT 10"
+            )).fetchall()
         final = ''
         for i in range(len(result)):
-            try:
-                user = bot.get_user(result[i][0])
-                final += str(i) + '. ' + user.name + ': ' + str(result[i][1]) + '\n'
-            except AttributeError:
-                try:
-                    user = await bot.fetch_user(result[i][0])
-                    final += str(i) + '. ' + user.name + ': ' + str(result[i][1]) + '\n'
-                except discord.errors.NotFound:
-                    final += str(i) + '. usunięty użytkownik: ' + str(result[i][1]) + '\n'
+            final += str(i) + '. ' + str(result[i][1]) + ': ' + str(result[i][2]) + '\n'
         embed = discord.Embed(
             colour=discord.Colour.dark_green(),
             title='Najwięcej dodanych reakcji na serwerze (tylko otwarte i istniejące kanały)',
@@ -506,20 +511,15 @@ def run_bot(bot_connection_string, garage_connection_string, token):
     async def get_reacted(ctx):
         if ctx.channel.id != int(os.getenv('COMMAND_CHANNEL_ID')):
             return
-        bot_cursor.execute("SELECT author_id, reacted FROM messages_count ORDER BY reacted DESC LIMIT 10")
-        result = bot_cursor.fetchall()
-        bot_connection.commit()
+        with bot_engine.connect() as cnx:
+            result = cnx.execute(text(
+                "SELECT author_id, name, reacted FROM messages_count mc "
+                "LEFT JOIN members m ON mc.author_id = m.id "
+                "ORDER BY reacted DESC LIMIT 10"
+            )).fetchall()
         final = ''
         for i in range(len(result)):
-            try:
-                user = bot.get_user(result[i][0])
-                final += str(i) + '. ' + user.name + ': ' + str(result[i][1]) + '\n'
-            except AttributeError:
-                try:
-                    user = await bot.fetch_user(result[i][0])
-                    final += str(i) + '. ' + user.name + ': ' + str(result[i][1]) + '\n'
-                except discord.errors.NotFound:
-                    final += str(i) + '. usunięty użytkownik: ' + str(result[i][1]) + '\n'
+            final += str(i) + '. ' + str(result[i][1]) + ': ' + str(result[i][2]) + '\n'
         embed = discord.Embed(
             colour=discord.Colour.dark_green(),
             title='Najwięcej otrzymanych reakcji na serwerze (tylko otwarte i istniejące kanały)',
@@ -529,37 +529,33 @@ def run_bot(bot_connection_string, garage_connection_string, token):
 
     # ---------------------- Generate Embed ----------------------
     def build_embed(event_id):
-        garage_engine = create_engine(garage_connection_string)
-        garage_connection = garage_engine.raw_connection()
-        garage_cursor = garage_connection.cursor()
+        with garage_engine.connect() as cnx:
+            event = cnx.execute(text("""SELECT e.id, e.name, l.id, l.name
+                FROM event e
+                LEFT JOIN league l ON e.league_id = l.id
+                WHERE e.id = :event_id AND e.deleted <> 1;"""), {'event_id': event_id}).fetchone()
 
-        garage_cursor.execute("""SELECT e.id, e.name, l.id, l.name
-                                          FROM event e
-                                          LEFT JOIN league l ON e.league_id = l.id
-                                          WHERE e.id = %s AND e.deleted <> 1;""", event_id)
-        event = garage_cursor.fetchone()
+            rows = cnx.execute(text("""SELECT p.is_present, du.id, t.name, t.colour,
+                IF(dl.id IS NOT NULL AND t.id IS NOT NULL, 1, 0) as isAssigned, l.id, t.team_emoji
+                FROM presence p
+                LEFT JOIN event e ON p.event_id = e.id
+                LEFT JOIN league l ON e.league_id = l.id
+                LEFT JOIN driver d ON p.driver_id = d.id
+                LEFT JOIN discord_user du ON d.discord_user_id = du.id
+                LEFT JOIN driver_leagues dl ON dl.drivers_id = d.id AND dl.leagues_id = l.id AND dl.deleted <> 1
+                LEFT JOIN team t ON dl.team_id = t.id AND t.deleted <> 1 AND t.name <> 'Rezerwa'
+                WHERE p.event_id = :event_id AND p.deleted <> 1;"""), {'event_id': event_id}).fetchall()
 
-        garage_cursor.execute("""SELECT p.is_present, du.id, t.name, t.colour,
-                                            IF(dl.id IS NOT NULL AND t.id IS NOT NULL, 1, 0) as isAssigned, l.id, t.team_emoji
-                                          FROM presence p
-                                          LEFT JOIN event e ON p.event_id = e.id
-                                          LEFT JOIN league l ON e.league_id = l.id
-                                          LEFT JOIN driver d ON p.driver_id = d.id
-                                          LEFT JOIN discord_user du ON d.discord_user_id = du.id
-                                          LEFT JOIN driver_leagues dl ON  dl.drivers_id = d.id AND dl.leagues_id = l.id AND dl.deleted <> 1
-                                          LEFT JOIN team t ON dl.team_id = t.id AND t.deleted <> 1 AND t.name <> 'Rezerwa'
-                                          WHERE p.event_id = %s AND p.deleted <> 1;""", event_id)
-        rows = garage_cursor.fetchall()
-
-        garage_connection.commit()
-
-        league_ids = set([r[5] for r in rows])
-
-        placeholders = ", ".join(str(l_id) for l_id in league_ids)
-        garage_cursor.execute("SELECT t.name, t.team_emoji FROM team t "
-                              "LEFT JOIN game g ON t.game_id = g.id "
-                              "LEFT JOIN league l ON g.id = l.game_id WHERE l.id = %s AND t.name <> 'Rezerwa'", placeholders)
-        teams = [x for x in garage_cursor.fetchall()]
+            league_ids = set([r[5] for r in rows])
+            placeholders = ", ".join(str(l_id) for l_id in league_ids)
+            if not league_ids:
+                teams = []
+            else:
+                teams = cnx.execute(text(
+                    "SELECT t.name, t.team_emoji FROM team t "
+                    "LEFT JOIN game g ON t.game_id = g.id "
+                    "LEFT JOIN league l ON g.id = l.game_id WHERE l.id IN (" + placeholders + ") AND t.name <> 'Rezerwa'"
+                )).fetchall()
 
         embed = discord.Embed(
             title=f"{event[1]} - {event[3]}",
@@ -589,54 +585,69 @@ def run_bot(bot_connection_string, garage_connection_string, token):
         except discord.NotFound:
             pass
 
-    # ---------------------- Scheduled Task ----------------------
-    @tasks.loop(seconds=30)
-    async def event_checker():
-        garage_engine = create_engine(garage_connection_string)
-        garage_connection = garage_engine.raw_connection()
-        garage_cursor = garage_connection.cursor()
+    # ---------------------- Trap channel helpers ----------------------
+    async def purge_user_messages(guild, member, cutoff):
+        async def purge_channel(channel):
+            perms = channel.permissions_for(member)
+            if not perms.view_channel:
+                return []
+            try:
+                return await channel.purge(
+                    limit=200,
+                    after=cutoff,
+                    check=lambda m: m.author.id == member.id,
+                    bulk=True,
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                return []
 
-        # Find events that are 10 hours away and not posted yet
-        garage_cursor.execute("""
-            SELECT dbe.id, e.id, l.send_post_channel_id, l.discord_group_id, dbe.message_id FROM discord_bot_events dbe
-            LEFT JOIN event e ON dbe.event_id = e.id
-            LEFT JOIN league l ON e.league_id = l.id
-            WHERE e.start_date >= NOW()
-            AND DATE_SUB(e.start_date, INTERVAL l.send_post_hours HOUR) <= NOW();
-        """)
-        events = garage_cursor.fetchall()
+        await asyncio.gather(*(purge_channel(ch) for ch in guild.text_channels))
+
+    async def send_warning_dm(member):
+        try:
+            await member.send(
+                "Zostałeś wyciszony na godzinę na serwerze ze względu na spam. "
+                "Natychmiast zmień hasło i wymuś wylogowanie ze wszystkich urządzeń."
+            )
+        except discord.Forbidden:
+            pass
+
+    # ---------------------- Scheduled Task ----------------------
+    @tasks.loop(minutes=30)
+    async def event_checker():
+        with garage_engine.connect() as cnx:
+            events = cnx.execute(text("""
+                SELECT dbe.id, e.id, gf.send_post_channel_id, l.discord_group_id, dbe.message_id FROM discord_bot_events dbe
+                LEFT JOIN event e ON dbe.event_id = e.id
+                LEFT JOIN league l ON e.league_id = l.id
+                LEFT JOIN game g ON g.id = l.game_id AND g.dtype = 'Game'
+                LEFT JOIN game gf ON gf.id = g.game_family_id AND gf.dtype = 'GameFamily'
+                WHERE e.start_date >= NOW()
+                AND DATE_SUB(e.start_date, INTERVAL l.send_post_hours HOUR) <= NOW();
+            """)).fetchall()
 
         for event in events:
-            channel = bot.get_channel(event[2])
-
+            channel = bot.get_channel(int(event[2]))
             embed = build_embed(event[1])
-
             if event[4] is None:
                 message = await channel.send(content=f"<@&{event[3]}>", embed=embed)
-                garage_cursor.execute("UPDATE discord_bot_events SET message_id=%s WHERE id=%s", (message.id, event[0]))
-                garage_connection.commit()
+                with garage_engine.begin() as cnx:
+                    cnx.execute(text("UPDATE discord_bot_events SET message_id=:message_id WHERE id=:id"),
+                                {'message_id': message.id, 'id': event[0]})
             else:
                 message = await channel.fetch_message(event[4])
                 asyncio.create_task(update_presence_embed(channel, message.id, event[1]))
 
-        garage_connection.commit()
-
     async def schedule_reminders():
-        garage_engine = create_engine(garage_connection_string)
-        garage_connection = garage_engine.raw_connection()
-        garage_cursor = garage_connection.cursor()
-
-        garage_cursor.execute("""
-            SELECT e.id, e.name, l.id, l.name, emb.value, DATE_SUB(e.start_date, INTERVAL emb.value HOUR) AS reminder_time 
-            FROM discord_bot_events dbe 
-            LEFT JOIN event e on dbe.event_id = e.id 
-            LEFT JOIN league l on e.league_id = l.id 
-            RIGHT JOIN event_mention_before emb on l.id = emb.league_id 
-            WHERE DATE_SUB(e.start_date, INTERVAL emb.value HOUR) >= NOW();
-        """)
-        reminders = garage_cursor.fetchall()
-
-        garage_connection.commit()
+        with garage_engine.connect() as cnx:
+            reminders = cnx.execute(text("""
+                SELECT e.id, e.name, l.id, l.name, emb.value, DATE_SUB(e.start_date, INTERVAL emb.value HOUR) AS reminder_time
+                FROM discord_bot_events dbe
+                LEFT JOIN event e on dbe.event_id = e.id
+                LEFT JOIN league l on e.league_id = l.id
+                RIGHT JOIN event_mention_before emb on l.id = emb.league_id
+                WHERE DATE_SUB(e.start_date, INTERVAL emb.value HOUR) >= NOW();
+            """)).fetchall()
 
         for r in reminders:
             scheduler.add_job(
@@ -649,25 +660,21 @@ def run_bot(bot_connection_string, garage_connection_string, token):
             )
 
     async def send_reminder(event_id, event_name, league_id, league_name, hours_before):
-        garage_engine = create_engine(garage_connection_string)
-        garage_connection = garage_engine.raw_connection()
-        garage_cursor = garage_connection.cursor()
+        with garage_engine.connect() as cnx:
+            not_selected_rows = cnx.execute(text("""SELECT du.id FROM driver_leagues dl
+                INNER JOIN team t ON dl.team_id = t.id AND t.deleted <> 1 AND t.name <> 'Rezerwa'
+                INNER JOIN driver d ON dl.drivers_id = d.id
+                INNER JOIN discord_user du ON d.discord_user_id = du.id
+                WHERE dl.leagues_id = :league_id AND d.id NOT IN
+                (SELECT d.id FROM presence p
+                LEFT JOIN event e ON p.event_id = e.id
+                LEFT JOIN driver d ON p.driver_id = d.id
+                LEFT JOIN league l ON e.league_id = l.id
+                LEFT JOIN driver_leagues dl ON dl.drivers_id = d.id AND dl.leagues_id = l.id
+                INNER JOIN team t ON dl.team_id = t.id AND t.deleted <> 1 AND t.name <> 'Rezerwa'
+                WHERE e.id = :event_id AND p.deleted <> 1);"""), {'league_id': league_id, 'event_id': event_id}).fetchall()
 
-        garage_cursor.execute("""SELECT du.id FROM driver_leagues dl
-                                            INNER JOIN team t ON dl.team_id = t.id AND t.deleted <> 1 AND t.name <> 'Rezerwa'
-                                            INNER JOIN driver d ON dl.drivers_id = d.id
-                                            INNER JOIN discord_user du ON d.discord_user_id = du.id
-                                            WHERE dl.leagues_id = %s AND d.id NOT IN
-                                            (SELECT d.id FROM presence p
-                                            LEFT JOIN event e ON p.event_id = e.id
-                                            LEFT JOIN driver d ON p.driver_id = d.id
-                                            LEFT JOIN league l ON e.league_id = l.id
-                                            LEFT JOIN driver_leagues dl ON dl.drivers_id = d.id AND dl.leagues_id = l.id
-                                            INNER JOIN team t ON dl.team_id = t.id AND t.deleted <> 1 AND t.name <> 'Rezerwa'
-                                            WHERE e.id = %s AND p.deleted <> 1);""", (league_id, event_id))
-        not_selected = (x[0] for x in garage_cursor.fetchall())
-
-        garage_connection.commit()
+        not_selected = (x[0] for x in not_selected_rows)
 
         for discord_id in not_selected:
             msg = f"{event_name} w lidze {league_name} rozpoczyna się za {hours_text(hours_before)}. Zgłoś obecność lub nieobecność na stronie: {os.getenv('DOMAIN_NAME')}/season/{league_id}/event/{event_id}"
@@ -681,10 +688,5 @@ def run_bot(bot_connection_string, garage_connection_string, token):
         elif 2 <= hours % 10 <= 4 and not 12 <= hours % 100 <= 14:
             return f"{hours} godziny"
         return f"{hours} godzin"
-
-    def create_connection(connection_string):
-        engine = create_engine(connection_string)
-        connection = engine.raw_connection()
-        return connection.cursor()
 
     bot.run(token)
