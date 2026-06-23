@@ -553,8 +553,10 @@ def run_bot(bot_connection_string, garage_connection_string, token):
             else:
                 teams = cnx.execute(text(
                     "SELECT t.name, t.team_emoji FROM team t "
-                    "LEFT JOIN game g ON t.game_id = g.id "
-                    "LEFT JOIN league l ON g.id = l.game_id WHERE l.id IN (" + placeholders + ") AND t.name <> 'Rezerwa'"
+                    "LEFT JOIN game g ON t.game_id = g.id AND dtype = 'Game' "
+                    "LEFT JOIN game gf ON g.game_family_id = gf.id AND dtype = 'GameFamily' "
+                    "LEFT JOIN league l ON g.id = l.game_id "
+                    "WHERE l.id IN (" + placeholders + ") AND t.name <> 'Rezerwa' AND gf.name = 'F1'"
                 )).fetchall()
 
         embed = discord.Embed(
@@ -613,7 +615,7 @@ def run_bot(bot_connection_string, garage_connection_string, token):
             pass
 
     # ---------------------- Scheduled Task ----------------------
-    @tasks.loop(minutes=30)
+    @tasks.loop(minutes=1)
     async def event_checker():
         with garage_engine.connect() as cnx:
             events = cnx.execute(text("""
