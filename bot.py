@@ -536,7 +536,7 @@ def run_bot(bot_connection_string, garage_connection_string, token):
                 WHERE e.id = :event_id AND e.deleted <> 1;"""), {'event_id': event_id}).fetchone()
 
             rows = cnx.execute(text("""SELECT p.is_present, du.id, t.name, t.colour,
-                IF(dl.id IS NOT NULL AND t.id IS NOT NULL, 1, 0) as isAssigned, l.id, t.team_emoji
+                IF(dl.id IS NOT NULL AND t.id IS NOT NULL, 1, 0) as isAssigned, l.id, t.team_emoji, d.name
                 FROM presence p
                 LEFT JOIN event e ON p.event_id = e.id
                 LEFT JOIN league l ON e.league_id = l.id
@@ -567,14 +567,14 @@ def run_bot(bot_connection_string, garage_connection_string, token):
 
         if teams:
             for t in teams:
-                field = [f"<@{r[1]}>" for r in rows if r[0] == 1 and r[4] == 1 and r[2] == t[0]]
+                field = [r[7] for r in rows if r[0] == 1 and r[4] == 1 and r[2] == t[0]]
                 embed.add_field(name=f"{t[1]} {t[0]} ({len(field)})", value="\n".join(field) or "—", inline=True)
         else:
-            field = [f"<@{r[1]}>" for r in rows if r[0] == 1 and r[4] == 1]
+            field = [r[7] for r in rows if r[0] == 1 and r[4] == 1]
             embed.add_field(name=f"✅ Obecność ({len(field)})", value="\n".join(field) or "—", inline=True)
-        declined = [f"<@{r[1]}>" for r in rows if r[0] == 0 and r[4] == 1]
+        declined = [r[7] for r in rows if r[0] == 0 and r[4] == 1]
         embed.add_field(name=f"❌ Nieobecność ({len(declined)})", value="\n".join(declined) or "—", inline=True)
-        reserve = [f"<@{r[1]}>" for r in rows if r[0] == 1 and r[4] == 0]
+        reserve = [r[7] for r in rows if r[0] == 1 and r[4] == 0]
         embed.add_field(name=f"🟣 Rezerwa ({len(reserve)})", value="\n".join(reserve) or "—", inline=True)
 
         return embed
