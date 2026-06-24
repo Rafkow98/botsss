@@ -567,14 +567,14 @@ def run_bot(bot_connection_string, garage_connection_string, token):
 
         if teams:
             for t in teams:
-                field = [bot.get_user(r[1]).display_name for r in rows if r[0] == 1 and r[4] == 1 and r[2] == t[0]]
+                field = [bot.get_user(int(r[1])).display_name for r in rows if r[0] == 1 and r[4] == 1 and r[2] == t[0]]
                 embed.add_field(name=f"{t[1]} {t[0]} ({len(field)})", value="\n".join(field) or "—", inline=True)
         else:
-            field = [bot.get_user(r[1]).display_name for r in rows if r[0] == 1 and r[4] == 1]
+            field = [bot.get_user(int(r[1])).display_name for r in rows if r[0] == 1 and r[4] == 1]
             embed.add_field(name=f"✅ Obecność ({len(field)})", value="\n".join(field) or "—", inline=True)
-        declined = [bot.get_user(r[1]).display_name for r in rows if r[0] == 0 and r[4] == 1]
+        declined = [bot.get_user(int(r[1])).display_name for r in rows if r[0] == 0 and r[4] == 1]
         embed.add_field(name=f"❌ Nieobecność ({len(declined)})", value="\n".join(declined) or "—", inline=True)
-        reserve = [bot.get_user(r[1]).display_name for r in rows if r[0] == 1 and r[4] == 0]
+        reserve = [bot.get_user(int(r[1])).display_name for r in rows if r[0] == 1 and r[4] == 0]
         embed.add_field(name=f"🟣 Rezerwa ({len(reserve)})", value="\n".join(reserve) or "—", inline=True)
 
         return embed
