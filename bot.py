@@ -639,7 +639,8 @@ def run_bot(bot_connection_string, garage_connection_string, token):
                     cnx.execute(text("UPDATE discord_bot_events SET message_id=:message_id WHERE id=:id"),
                                 {'message_id': message.id, 'id': event[0]})
             else:
-                continue
+                message = await channel.fetch_message(event[4])
+                asyncio.create_task(update_presence_embed(channel, message.id, event[1]))
 
     async def schedule_reminders():
         with garage_engine.connect() as cnx:
