@@ -639,8 +639,7 @@ def run_bot(bot_connection_string, garage_connection_string, token):
                     cnx.execute(text("UPDATE discord_bot_events SET message_id=:message_id WHERE id=:id"),
                                 {'message_id': message.id, 'id': event[0]})
             else:
-                message = await channel.fetch_message(event[4])
-                asyncio.create_task(update_presence_embed(channel, message.id, event[1]))
+                continue
 
     async def schedule_reminders():
         with garage_engine.connect() as cnx:
@@ -682,7 +681,7 @@ def run_bot(bot_connection_string, garage_connection_string, token):
 
         for discord_id in not_selected:
             msg = f"{event_name} w lidze {league_name} rozpoczyna się za {hours_text(hours_before)}. Zgłoś obecność lub nieobecność na stronie: {os.getenv('DOMAIN_NAME')}/season/{league_id}/event/{event_id}"
-            user = bot.get_user(discord_id)
+            user = bot.get_user(int(discord_id))
             if user:
                 await user.send(msg)
 
