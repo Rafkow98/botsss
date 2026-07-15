@@ -682,7 +682,17 @@ def run_bot(bot_connection_string, garage_connection_string, token):
 
         for discord_id in not_selected:
             msg = f"{event_name} w lidze {league_name} rozpoczyna się za {hours_text(hours_before)}. Zgłoś obecność lub nieobecność na stronie: {os.getenv('DOMAIN_NAME')}/season/{league_id}/event/{event_id}"
-            user = bot.get_user(int(discord_id))
+            try:
+                user = bot.get_user(int(discord_id))
+            except discord.errors.NotFound:
+                print(f"NotFound - id: {discord_id}")
+                continue
+            except discord.errors.Forbidden:
+                print(f"Forbidden - id: {discord_id}")
+                continue
+            except discord.errors.HTTPException:
+                print(f"HTTP Exception - id: {discord_id}")
+                continue
             if user:
                 await user.send(msg)
 
