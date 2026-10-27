@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import random
 import re
@@ -7,25 +8,37 @@ from datetime import timedelta, datetime, timezone
 import pandas as pd
 
 import discord
-from discord import MessageType
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, bindparam
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 load_dotenv()
 
-def run_bot(bot_connection_string, garage_connection_string, token):
+log = logging.getLogger('simss-bot')
+
+SAFE_MENTIONS = discord.AllowedMentions(everyone=False, users=False, roles=False, replied_user=True)
+NO_MENTIONS = discord.AllowedMentions.none()
+DISCORD_MSG_LIMIT = 2000
+EMBED_FIELD_LIMIT = 1024
+
+def run_bot(bot_connection_string, garage_connection_string, token, connect_args = None):
     intents = discord.Intents.all()
     intents.members = True
 
-    bot = commands.Bot(command_prefix="!", intents=intents)
+    bot = commands.Bot(command_prefix="!", intents=intents, allowed_mentions=SAFE_MENTIONS)
     bot.remove_command("help")
 
     scheduler = AsyncIOScheduler()
 
+    connect_args = connect_args or {}
+
     bot_engine = create_engine(bot_connection_string, pool_pre_ping=True)
     garage_engine = create_engine(garage_connection_string, pool_pre_ping=True)
+
+    for engine in (bot_engine, garage_engine):
+        with engine.connect():
+            pass
 
     bots = [968851237405597717, 475744554910351370, 235148962103951360, 762217899355013120, 159985870458322944,
             1311665961027244084, 734535151899639910, 1311665961027244084, 1211781489931452447]
@@ -51,13 +64,80 @@ def run_bot(bot_connection_string, garage_connection_string, token):
     toxic_words = ['huj', 'cip', 'pierda', 'pierdo', 'dup', 'kurew', 'kurw', 'kutas', 'pizd', 'jeb', 'rucha', 'sra']
     racist_words = ['niger', 'nigger', 'niga', 'nyga', 'nigga', 'czarnuch', 'murzyn', 'rasis', 'rasiz']
 
-    invite_pattern = re.compile(r"discord\.gg\/[A-Za-z0-9]+|discord\.com\/invite\/[A-Za-z0-9]+")
+    invite_pattern = re.compile(r"(?:discord(?:app)?\s*\.\s*(?:gg | com\s * /\s * invite | io | me | li) | dsc\s *\.\s * gg "
+                                r"| invite\s *\.\s * gg)\s * /\s * [A - Zaz0 - 9 -] + ", re.IGNORECASE,)
 
     admins = [523929325171638280, 146344154887094273, 917064080366391386, 686636820196491305, 1376320417890963546, 308273688208211968, 1288993340532064338, 573780343488905221]
 
+    trapped_users = set()
+
+    def is_privileged(member):
+        if member.id in admins:
+            return True
+        return isinstance(member, discord.Member) and member.guild_permissions.manage_messages
+
+    def classify(content):
+        content = (content or '').lower()
+        return (any(w in content for w in toxic_words),
+                any(w in content for w in racist_words))
+
+    def update_message_counts(author_id, content, delta):
+        is_toxic, is_racist = classify(content)
+        sets = ["`all` = `all` + :d", "all_24 = all_24 + :d"]
+        if is_toxic:
+            sets += ["toxic = toxic + :d", "toxic_24 = toxic_24 + :d"]
+        if is_racist:
+            sets += ["racism = racism + :d", "racism_24 = racism_24 + :d"]
+        with bot_engine.begin() as cnx:
+            cnx.execute(text(f"UPDATE messages_count SET {', '.join(sets)} WHERE author_id =:id"),
+            {'d': delta, 'id': author_id})
+
+    async def run_db(func, *args):
+        return await asyncio.to_thread(func, *args)
+
+    async def send_log(content):
+        channel = bot.get_channel(int(os.getenv('BIN_CHANNEL_ID')))
+        if channel is None:
+            log.warning("Nie znaleziono kanału BIN_CHANNEL_ID")
+            return
+        chunk = DISCORD_MSG_LIMIT - 50
+        for i in range(0, len(content), chunk):
+            try:
+                await channel.send(content[i:i + chunk], allowed_mentions=NO_MENTIONS)
+            except discord.HTTPException as e:
+                log.warning("Nie udało się wysłać logu: %s", e)
+            return
+
+    async def check_invite(message):
+        if not invite_pattern.search(message.content or ''):
+            return False
+        if is_privileged(message.author):
+            return False
+        try:
+            await message.delete()
+        except discord.NotFound:
+            pass
+        except discord.Forbidden:
+            log.warning("Brak uprawnień do usunięcia zaproszenia w kanale %s", message.channel.id)
+            return False
+        await message.channel.send(f'{message.author.mention}, wysyłanie zaproszeń jest zabronione na tym serwerze.',
+            allowed_mentions = discord.AllowedMentions(users=[message.author]))
+        return True
+
+    def name_or_mention(guild, user_id):
+        member = guild.get_member(int(user_id)) if guild else None
+        return member.display_name if member else f"<@{user_id}>"
+
+    def field_value(names):
+        value = "\n".join(names) or "—"
+        if len(value) > EMBED_FIELD_LIMIT:
+            value = value[:EMBED_FIELD_LIMIT - 1] + "…"
+        return value
+
     @bot.event
     async def on_ready():
-        event_checker.start()
+        if not event_checker.is_running:
+            event_checker.start()
 
         channels_list = []
         members_list = []
@@ -85,7 +165,9 @@ def run_bot(bot_connection_string, garage_connection_string, token):
             cnx.execute(text("DROP TABLE members_temp"))
 
         asyncio.create_task(schedule_reminders())
-        scheduler.start()
+        if not scheduler.running:
+            scheduler.start()
+        scheduler.add_job(schedule_reminders, "interval", minutes=30, id="refresh_reminders", replace_existing=True)
 
     @bot.event
     async def on_member_join(member):
@@ -101,146 +183,142 @@ def run_bot(bot_connection_string, garage_connection_string, token):
 
     @bot.event
     async def on_message(message):
-        if bot.user.mentioned_in(message) and message.type != MessageType.reply:
-            await message.reply(random.choice(gifs))
+        if message.author.bot:
+            return
+        if message.guild is None:
+            await bot.process_commands(message)
+            return
         if message.channel.id == int(os.getenv('QUOTES_CHANNEL_ID')) and len(message.attachments) == 0:
-            await message.delete()
-        if message.channel.id == int(os.getenv('TRAP_CHANNEL_ID')):
-            timeout_minutes = int(os.getenv('TIMEOUT_MINUTES'))
-            delete_minutes = int(os.getenv('DELETE_MESSAGES_MINUTES'))
-            cutoff = datetime.now(timezone.utc) - timedelta(minutes=delete_minutes)
             try:
-                await message.author.timeout(timedelta(minutes=timeout_minutes))
-            except discord.Forbidden:
-                print("Can't timeout - missing permissions")
-            asyncio.create_task(purge_user_messages(message.guild, message.author, cutoff))
-            asyncio.create_task(send_warning_dm(message.author))
-        with bot_engine.begin() as cnx:
-            cnx.execute(text("INSERT IGNORE INTO messages(message_id, type, timestamp, timestampEdited, isPinned, content, author_id, "
-                             "channel_id, attachments, embeds, stickers, mentions) "
-                             "VALUES(:id, :type, :created, :edited, :pinned, :content, :author, :channel, :attachments, :embeds, :stickers, :mentions)"),
-                        {'id': message.id, 'type': message.type, 'created': message.created_at,
-                         'edited': message.edited_at,
-                         'pinned': message.pinned, 'content': message.content, 'author': message.author.id,
-                         'channel': message.channel.id,
-                         'attachments': bool(message.attachments), 'embeds': bool(message.embeds),
-                         'stickers': bool(message.stickers),
-                         'mentions': bool(message.mentions)})
-
-        is_toxic = any(elem in message.content.lower() for elem in toxic_words)
-        is_racist = any(elem in message.content.lower() for elem in racist_words)
-        if is_toxic and is_racist:
-            with bot_engine.begin() as cnx:
-                cnx.execute(text("UPDATE messages_count SET `all` = `all` + 1, all_24 = all_24 + 1, toxic = toxic + 1, "
-                                 "toxic_24 = toxic_24 + 1, racism = racism + 1, racism_24 = racism_24 + 1 WHERE author_id = :id"),
-                            {'id': message.author.id})
-        elif is_toxic and not is_racist:
-            with bot_engine.begin() as cnx:
-                cnx.execute(text("UPDATE messages_count SET `all` = `all` + 1, all_24 = all_24 + 1, toxic = toxic + 1, "
-                                 "toxic_24 = toxic_24 + 1 WHERE author_id = :id"),
-                            {'id': message.author.id})
-        elif not is_toxic and is_racist:
-            with bot_engine.begin() as cnx:
-                cnx.execute(
-                    text("UPDATE messages_count SET `all` = `all` + 1, all_24 = all_24 + 1, racism = racism + 1, "
-                         "racism_24 = racism_24 + 1 WHERE author_id = :id"),
-                    {'id': message.author.id})
-        else:
-            with bot_engine.begin() as cnx:
-                cnx.execute(
-                    text("UPDATE messages_count SET `all` = `all` + 1, all_24 = all_24 + 1 WHERE author_id = :id"),
-                    {'id': message.author.id})
-
-        if invite_pattern.search(message.content):
-            if message.author.id not in admins:
                 await message.delete()
-                await message.channel.send(
-                    f'{message.author.mention}, wysyłanie zaproszeń jest zabronione na tym serwerze.')
+            except discord.NotFound:
+                pass
+        if message.channel.id == int(os.getenv('TRAP_CHANNEL_ID')):
+            await handle_trap(message)
 
+        params = {'id': message.id, 'type': message.type, 'created': message.created_at, 'edited': message.edited_at,
+                  'pinned': message.pinned, 'content': message.content, 'author': message.author.id,
+                  'channel': message.channel.id, 'attachments': bool(message.attachments), 'embeds': bool(message.embeds),
+                  'stickers': bool(message.stickers), 'mentions': bool(message.mentions)}
+
+        await run_db(store_message, params, message.content)
+        await check_invite(message)
         await bot.process_commands(message)
+
+    def store_message(params, content):
+        with bot_engine.begin() as cnx:
+            cnx.execute(text("INSERT IGNORE INTO messages(message_id, type, timestamp, timestampEdited, isPinned, "
+                             "content, author_id, channel_id, attachments, embeds, stickers, mentions) "
+                             "VALUES(:id, :type, :created, :edited, :pinned, :content, :author, :channel, "
+                             ":attachments, :embeds, :stickers,:mentions)"), params)
+
+        update_message_counts(params['author'], content, 1)
 
     @bot.event
     async def on_message_edit(before, after):
-        if before.author.id not in bots and after.embeds == []:
-            with bot_engine.begin() as cnx:
-                cnx.execute(text("UPDATE messages SET content = :new, attachments = :attachments, embeds = :embeds, "
-                                 "stickers = :stickers, mentions = :mentions WHERE id = :id"),
-                            {'new': after.content, 'attachments': bool(after.attachments), 'embeds': bool(after.embeds),
-                             'stickers': bool(after.stickers), 'mentions': bool(after.mentions), 'id': after.id})
+        if after.author.bot or after.guild is None or before.content == after.content:
+            return
 
-            bin_channel = bot.get_channel(int(os.getenv('BIN_CHANNEL_ID')))
-            await bin_channel.send(f"*Edytowana wiadomość użytkownika **{before.author.name}** *\n"
-                                   f"Stara wersja: {before.content}\n"
-                                   f"Nowa wersja: {after.content}\n"
-                                   f"Wiadomość: {after.jump_url}")
+        await send_log(f"*Edytowana wiadomość użytkownika **{discord.utils.escape_markdown(before.author.name)}** *\n"
+            f"Stara wersja: {before.content}\n"
+            f"Nowa wersja: {after.content}\n"
+            f"Wiadomość: {after.jump_url}")
+
+        await check_invite(after)
+
+        try:
+            await run_db(update_edited_message, after.id, after.content, bool(after.attachments), bool(after.embeds),
+                         bool(after.stickers), bool(after.mentions))
+        except Exception:
+            log.exception("Nie udało się zaktualizować edytowanej wiadomości %s", after.id)
+
+    def update_edited_message(message_id, content, attachments, embeds,
+                              stickers, mentions):
+        with bot_engine.begin() as cnx:
+            cnx.execute(text("UPDATE messages SET content = :new, attachments =:attachments, embeds =:embeds, "
+                             "stickers = :stickers, mentions = :mentions WHERE message_id =:id"),
+                {'new': content, 'attachments': attachments, 'embeds': embeds, 'stickers': stickers,
+                 'mentions': mentions, 'id': message_id})
 
     @bot.event
     async def on_message_delete(message):
-        if message.author.id not in bots:
-            with bot_engine.begin() as cnx:
-                cnx.execute(text("DELETE FROM messages WHERE message_id = :id"), {'id': message.id})
-        is_toxic = any(elem in message.content.lower() for elem in toxic_words)
-        is_racist = any(elem in message.content.lower() for elem in racist_words)
-        if is_toxic and is_racist:
-            with bot_engine.begin() as cnx:
-                cnx.execute(text("UPDATE messages_count SET `all` = `all` - 1, all_24 = all_24 - 1, toxic = toxic - 1, "
-                                 "toxic_24 = toxic_24 - 1, racism = racism - 1, racism_24 = racism_24 - 1 WHERE author_id = :id"),
-                            {'id': message.author.id})
-        elif is_toxic and not is_racist:
-            with bot_engine.begin() as cnx:
-                cnx.execute(text("UPDATE messages_count SET `all` = `all` - 1, all_24 = all_24 - 1, toxic = toxic - 1, "
-                                 "toxic_24 = toxic_24 - 1 WHERE author_id = :id"),
-                            {'id': message.author.id})
-        elif not is_toxic and is_racist:
-            with bot_engine.begin() as cnx:
-                cnx.execute(
-                    text("UPDATE messages_count SET `all` = `all` - 1, all_24 = all_24 - 1, racism = racism - 1, "
-                         "racism_24 = racism_24 - 1 WHERE author_id = :id"),
-                    {'id': message.author.id})
-        else:
-            with bot_engine.begin() as cnx:
-                cnx.execute(
-                    text("UPDATE messages_count SET `all` = `all` - 1, all_24 = all_24 - 1 WHERE author_id = :id"),
-                    {'id': message.author.id})
+        if message.author.bot or message.guild is None:
+            return
+        await send_log(f"*Usunięta wiadomość użytkownika **{discord.utils.escape_markdown(message.author.name)} ** *\n"
+            f"{message.content}")
+        try:
+            await run_db(delete_stored_message, message.id, message.author.id, message.content)
+        except Exception:
+            log.exception("Nie udało się usunąć wiadomości %s z bazy", message.id)
 
-            bin_channel = bot.get_channel(int(os.getenv('BIN_CHANNEL_ID')))
-            await bin_channel.send(f"*Usunięta wiadomość użytkownika **{message.author.name}** *\n{message.content}")
+    def delete_stored_message(message_id, author_id, content):
+        with bot_engine.begin() as cnx:
+            cnx.execute(text("DELETE FROM messages WHERE message_id = :id"),
+                        {'id': message_id})
+        update_message_counts(author_id, content, -1)
+
+    def get_stored_author(message_id):
+        with bot_engine.connect() as cnx:
+            row = cnx.execute(text("SELECT author_id FROM messages WHERE message_id =:id"), {'id': message_id}).fetchone()
+        return row[0] if row else None
+
+    async def resolve_message_author(payload):
+        author_id = getattr(payload, 'message_author_id', None)
+        if author_id:
+            return author_id
+        author_id = await run_db(get_stored_author, payload.message_id)
+        if author_id:
+            return author_id
+        channel = bot.get_channel(payload.channel_id)
+        if channel is None:
+            return None
+        try:
+            message = await channel.fetch_message(payload.message_id)
+        except (discord.NotFound, discord.Forbidden):
+            return None
+        return message.author.id
+
+    def store_reaction(message_id, reaction_id, user_id, author_id, delta):
+        with bot_engine.begin() as cnx:
+            if delta > 0:
+                cnx.execute(text("INSERT IGNORE INTO reactions(message_id, reaction_id, reacting_user_id, author_id) "
+                                 "VALUES(:message_id, :reaction_id, :r_user_id, :author_id)"),
+                            {'message_id': message_id, 'reaction_id': reaction_id, 'r_user_id': user_id, 'author_id': author_id})
+            else:
+                cnx.execute(text("DELETE FROM reactions WHERE message_id = :message_id AND reaction_id =:reaction_id "
+                                 "AND reacting_user_id = :r_user_id AND author_id =:author_id"),
+                            {'message_id': message_id, 'reaction_id': reaction_id, 'r_user_id': user_id, 'author_id': author_id})
+
+            cnx.execute(text("UPDATE messages_count SET reaction = reaction + :d WHERE author_id =:r_user_id"),
+                        {'d': delta, 'r_user_id': user_id})
+            cnx.execute(text("UPDATE messages_count SET reacted = reacted + :d WHERE author_id =:id"),
+                        {'d': delta, 'id': author_id})
 
     @bot.event
     async def on_raw_reaction_add(payload):
-        channel = bot.get_channel(payload.channel_id)
-        message = await channel.fetch_message(payload.message_id)
-
-        with bot_engine.begin() as cnx:
-            cnx.execute(text("INSERT IGNORE INTO reactions(message_id, reaction_id, reacting_user_id, author_id) "
-                             "VALUES(:message_id, :reaction_id, :r_user_id, :author_id)"),
-                        {'message_id': payload.message_id, 'reaction_id': payload.emoji.id,
-                         'r_user_id': payload.user_id,
-                         'author_id': message.author.id})
-            cnx.execute(text("UPDATE messages_count SET reaction = reaction + 1 WHERE author_id = :r_user_id"),
-                        {'r_user_id': payload.user_id})
-            cnx.execute(text("UPDATE messages_count SET reacted = reacted + 1 WHERE author_id = :id;"),
-                        {'id': message.author.id})
+        if payload.guild_id is None or payload.user_id == bot.user.id:
+            return
+        if payload.member is not None and payload.member.bot:
+            return
+        author_id = await resolve_message_author(payload)
+        if author_id is None:
+            return
+        await run_db(store_reaction, payload.message_id, payload.emoji.id, payload.user_id, author_id, 1)
 
     @bot.event
     async def on_raw_reaction_remove(payload):
-        channel = bot.get_channel(payload.channel_id)
-        message = await channel.fetch_message(payload.message_id)
+        if payload.guild_id is None or payload.user_id == bot.user.id:
+            return
+        author_id = await resolve_message_author(payload)
+        if author_id is None:
+            return
+        await run_db(store_reaction, payload.message_id, payload.emoji.id, payload.user_id, author_id, -1)
 
-        with bot_engine.begin() as cnx:
-            cnx.execute(text("DELETE FROM reactions WHERE message_id = :message_id AND reaction_id = :reaction_id "
-                             "AND reacting_user_id = :r_user_id AND author_id = :author_id"),
-                        {'message_id': payload.message_id, 'reaction_id': payload.emoji.id,
-                         'r_user_id': payload.user_id,
-                         'author_id': message.author.id})
-            cnx.execute(text("UPDATE messages_count SET reaction = reaction - 1 WHERE author_id = :r_user_id"),
-                        {'r_user_id': payload.user_id})
-            cnx.execute(text("UPDATE messages_count SET reacted = reacted - 1 WHERE author_id = :id;"),
-                        {'id': message.author.id})
+        user = bot.get_user(payload.user_id)
+        user_name = discord.utils.escape_markdown(user.name) if user else f"<@{payload.user_id}>"
 
-        bin_channel = bot.get_channel(int(os.getenv('BIN_CHANNEL_ID')))
-        await bin_channel.send(f"Usunięta reakcja <:{payload.emoji.name}:{payload.emoji.id}> użytkownika "
-                               f"**{bot.get_user(payload.user_id).name}** do wiadomości {message.jump_url}")
+        jump_url = f"https://discord.com/channels/{payload.guild_id}/{payload.channel_id}/{payload.message_id}"
+        await send_log(f"Usunięta reakcja {payload.emoji} użytkownika **{user_name}** do wiadomości {jump_url}")
 
     @bot.command(name='toxic')
     async def count_toxic_messages(ctx, user: discord.User = False):
@@ -254,7 +332,10 @@ def run_bot(bot_connection_string, garage_connection_string, token):
                     text("SELECT all_24, toxic_24 FROM messages_count WHERE author_id = :id"),
                     {'id': user.id}
                 ).fetchone()
-            total_count, toxic_count = row[0], row[1]
+            if row is None:
+                await ctx.reply(f"Użytkownik **{user.name}** ma mniej niż 100 wiadomości na serwerze")
+                return
+            total_count, toxic_count = row[0] or 0, row[1] or 0
 
             if total_count > 100:
                 if toxic_count > 10:
@@ -274,7 +355,7 @@ def run_bot(bot_connection_string, garage_connection_string, token):
     async def get_avatar(ctx, user: discord.User = False):
         if not user:
             user = ctx.author
-        av = user.avatar.url
+        av = user.display_avatar.url
         await ctx.reply(content=f'Avatar użytkownika **{user.name}**', embed=discord.Embed().set_image(url=av))
 
     @bot.command(name='help')
@@ -451,6 +532,11 @@ def run_bot(bot_connection_string, garage_connection_string, token):
                 "AS rank_reacted, RANK() OVER(ORDER BY reacted/`all` DESC) AS ratio, author_id FROM messages_count) "
                 "AS t WHERE author_id = :id"
             ), {'id': user.id}).fetchone()
+
+        if result is None:
+            await ctx.reply(f"Brak statystyk dla użytkownika **{user.name}**")
+            return
+
         final = (f"Liczba wiadomości: {result[0]} ({result[4]}.)\n"
                  f"Liczba dodanych reakcji: {result[1]} ({result[5]}.)\n"
                  f"Liczba otrzymanych reakcji: {result[2]} ({result[6]}.)\n"
@@ -535,6 +621,9 @@ def run_bot(bot_connection_string, garage_connection_string, token):
                 LEFT JOIN league l ON e.league_id = l.id
                 WHERE e.id = :event_id AND e.deleted <> 1;"""), {'event_id': event_id}).fetchone()
 
+            if event is None:
+                return None
+
             rows = cnx.execute(text("""SELECT p.is_present, du.id, t.name, t.colour,
                 IF(dl.id IS NOT NULL AND t.id IS NOT NULL, 1, 0) as isAssigned, l.id, t.team_emoji
                 FROM presence p
@@ -544,20 +633,22 @@ def run_bot(bot_connection_string, garage_connection_string, token):
                 LEFT JOIN discord_user du ON d.discord_user_id = du.id
                 LEFT JOIN driver_leagues dl ON dl.drivers_id = d.id AND dl.leagues_id = l.id AND dl.deleted <> 1
                 LEFT JOIN team t ON dl.team_id = t.id AND t.deleted <> 1 AND t.name <> 'Rezerwa'
-                WHERE p.event_id = :event_id AND p.deleted <> 1;"""), {'event_id': event_id}).fetchall()
+                WHERE p.event_id = :event_id AND p.deleted <> 1
+                ORDER BY p.date;"""), {'event_id': event_id}).fetchall()
 
-            league_ids = set([r[5] for r in rows])
-            placeholders = ", ".join(str(l_id) for l_id in league_ids)
+            rows = [r for r in rows if r[1] is not None]
+
+            league_ids = sorted({r[5] for r in rows if r[5] is not None})
             if not league_ids:
                 teams = []
             else:
-                teams = cnx.execute(text(
-                    "SELECT t.name, t.team_emoji FROM team t "
-                    "LEFT JOIN game g ON t.game_id = g.id AND g.dtype = 'Game' "
-                    "LEFT JOIN game gf ON g.game_family_id = gf.id AND gf.dtype = 'GameFamily' "
-                    "LEFT JOIN league l ON g.id = l.game_id "
-                    "WHERE l.id IN (" + placeholders + ") AND t.name <> 'Rezerwa' AND gf.name = 'F1'"
-                )).fetchall()
+                teams = cnx.execute(text("SELECT t.name, t.team_emoji FROM team t "
+                                         "LEFT JOIN game g ON t.game_id = g.id AND g.dtype = 'Game' "
+                                         "LEFT JOIN game gf ON g.game_family_id = gf.id AND gf.dtype = 'GameFamily' "
+                                         "LEFT JOIN league l ON g.id = l.game_id "
+                                         "WHERE l.id IN :league_ids AND t.name <> 'Rezerwa' "
+                                         "AND gf.name = 'F1'").bindparams(bindparam('league_ids', expanding=True)),
+                                    {'league_ids': league_ids}).fetchall()
 
         embed = discord.Embed(
             title=f"{event[1]} - {event[3]}",
@@ -569,25 +660,17 @@ def run_bot(bot_connection_string, garage_connection_string, token):
 
         if teams:
             for t in teams:
-                field = [guild.get_member(int(r[1])).display_name for r in rows if r[0] == 1 and r[4] == 1 and r[2] == t[0]]
-                embed.add_field(name=f"{t[1]} {t[0]} ({len(field)})", value="\n".join(field) or "—", inline=True)
+                field = [name_or_mention(guild, r[1]) for r in rows if r[0] == 1 and r[4] == 1 and r[2] == t[0]]
+                embed.add_field(name=f"{t[1]} {t[0]} ({len(field)})", value=field_value(field) or "—", inline=True)
         else:
-            field = [guild.get_member(int(r[1])).display_name for r in rows if r[0] == 1 and r[4] == 1]
-            embed.add_field(name=f"✅ Obecność ({len(field)})", value="\n".join(field) or "—", inline=True)
-        declined = [guild.get_member(int(r[1])).display_name for r in rows if r[0] == 0 and r[4] == 1]
-        embed.add_field(name=f"❌ Nieobecność ({len(declined)})", value="\n".join(declined) or "—", inline=True)
-        reserve = [guild.get_member(int(r[1])).display_name for r in rows if r[0] == 1 and r[4] == 0]
-        embed.add_field(name=f"🟣 Rezerwa ({len(reserve)})", value="\n".join(reserve) or "—", inline=True)
+            field = [name_or_mention(guild, r[1]) for r in rows if r[0] == 1 and r[4] == 1]
+            embed.add_field(name=f"✅ Obecność ({len(field)})", value=field_value(field) or "—", inline=True)
+        declined = [name_or_mention(guild, r[1]) for r in rows if r[0] == 0 and r[4] == 1]
+        embed.add_field(name=f"❌ Nieobecność ({len(declined)})", value=field_value(declined) or "—", inline=True)
+        reserve = [name_or_mention(guild, r[1]) for r in rows if r[0] == 1 and r[4] == 0]
+        embed.add_field(name=f"🟣 Rezerwa ({len(reserve)})", value=field_value(reserve) or "—", inline=True)
 
         return embed
-
-    async def update_presence_embed(channel, message_id, event_id):
-        try:
-            message = await channel.fetch_message(message_id)
-            embed = build_embed(event_id)
-            await message.edit(embed=embed)
-        except discord.NotFound:
-            pass
 
     # ---------------------- Trap channel helpers ----------------------
     async def purge_user_messages(guild, member, cutoff):
@@ -607,20 +690,43 @@ def run_bot(bot_connection_string, garage_connection_string, token):
 
         await asyncio.gather(*(purge_channel(ch) for ch in guild.text_channels))
 
-    async def send_warning_dm(member):
+    async def handle_trap(message):
+        member = message.author
+
+        if member.id in trapped_users:
+            return
+
+        trapped_users.add(member.id)
+        timeout_minutes = int(os.getenv('TIMEOUT_MINUTES'))
+        delete_minutes = int(os.getenv('DELETE_MESSAGES_MINUTES'))
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=delete_minutes)
+        try:
+            await member.timeout(timedelta(minutes=timeout_minutes), reason="Wiadomość na kanale-pułapce (spam)")
+        except discord.Forbidden:
+            log.warning("Nie można wyciszyć %s - brak uprawnień", member.id)
+
+        async def purge_and_release():
+            try:
+                await purge_user_messages(message.guild, member, cutoff)
+            finally:
+                trapped_users.discard(member.id)
+
+            asyncio.create_task(purge_and_release())
+            asyncio.create_task(send_warning_dm(member, timeout_minutes))
+
+    async def send_warning_dm(member, timeout_minutes):
         try:
             await member.send(
-                "Zostałeś wyciszony na godzinę na serwerze ze względu na spam. "
-                "Natychmiast zmień hasło i wymuś wylogowanie ze wszystkich urządzeń."
-            )
-        except discord.Forbidden:
+                f"Zostałeś wyciszony na {timeout_minutes} minut na serwerze ze względu na spam. "
+                f"Natychmiast zmień hasło i wymuś wylogowanie ze wszystkich urządzeń.")
+        except (discord.Forbidden, discord.HTTPException):
             pass
 
-    # ---------------------- Scheduled Task ----------------------
-    @tasks.loop(minutes=1)
-    async def event_checker():
+        # ---------------------- Scheduled Task ----------------------
+
+    def fetch_due_events():
         with garage_engine.connect() as cnx:
-            events = cnx.execute(text("""
+            return cnx.execute(text("""
                 SELECT dbe.id, e.id, gf.send_post_channel_id, l.discord_group_id, dbe.message_id FROM discord_bot_events dbe
                 LEFT JOIN event e ON dbe.event_id = e.id
                 LEFT JOIN league l ON e.league_id = l.id
@@ -630,17 +736,47 @@ def run_bot(bot_connection_string, garage_connection_string, token):
                 AND DATE_SUB(e.start_date, INTERVAL l.send_post_hours HOUR) <= NOW();
             """)).fetchall()
 
+    def save_event_message(dbe_id, message_id):
+        with garage_engine.begin() as cnx:
+            cnx.execute(text("UPDATE discord_bot_events SET message_id =:message_id WHERE id =:id"),
+                        {'message_id': message_id, 'id': dbe_id})
+
+    missing_event_messages = set()
+
+    async def process_event(event):
+        dbe_id, event_id, channel_id, role_id, message_id = event
+        channel = bot.get_channel(int(channel_id)) if channel_id else None
+        if channel is None:
+            log.warning("Event %s: brak kanału %s", event_id, channel_id)
+            return
+        embed = build_embed(event_id)
+        if embed is None:
+            return
+        if message_id is None:
+            message = await channel.send(content=f"<@&{role_id}>", embed=embed,
+                                         allowed_mentions=discord.AllowedMentions(roles=True))
+            await run_db(save_event_message, dbe_id, message.id)
+            return
+        try:
+            message = await channel.fetch_message(int(message_id))
+            await message.edit(embed=embed)
+        except discord.NotFound:
+            if message_id not in missing_event_messages:
+                missing_event_messages.add(message_id)
+                log.warning("Event %s: wiadomość %s została usunięta", event_id, message_id)
+
+    @tasks.loop(minutes=1)
+    async def event_checker():
+        try:
+            events = await run_db(fetch_due_events)
+        except Exception:
+            log.exception("event_checker: błąd pobierania eventów")
+            return
         for event in events:
-            channel = bot.get_channel(int(event[2]))
-            embed = build_embed(event[1])
-            if event[4] is None:
-                message = await channel.send(content=f"<@&{event[3]}>", embed=embed)
-                with garage_engine.begin() as cnx:
-                    cnx.execute(text("UPDATE discord_bot_events SET message_id=:message_id WHERE id=:id"),
-                                {'message_id': message.id, 'id': event[0]})
-            else:
-                message = await channel.fetch_message(event[4])
-                asyncio.create_task(update_presence_embed(channel, message.id, event[1]))
+            try:
+                await process_event(event)
+            except Exception:
+                log.exception("event_checker: błąd przy evencie %s", event[1])
 
     async def schedule_reminders():
         with garage_engine.connect() as cnx:
@@ -654,14 +790,18 @@ def run_bot(bot_connection_string, garage_connection_string, token):
             """)).fetchall()
 
         for r in reminders:
-            scheduler.add_job(
-                send_reminder,
-                "date",
-                run_date=r[5],
-                args=[r[0], r[1], r[2], r[3], r[4]],
-                id=f"{r[1]}_{r[4]}",
-                replace_existing=True,
-            )
+            try:
+                scheduler.add_job(
+                    send_reminder,
+                    "date",
+                    run_date=r[5],
+                    args=[r[0], r[1], r[2], r[3], r[4]],
+                    id=f"reminder_{r[0]}_{r[4]}",
+                    replace_existing=True,
+                )
+            except Exception:
+                log.exception("event_checker: błąd przy evencie %s", r[0])
+
 
     async def send_reminder(event_id, event_name, league_id, league_name, hours_before):
         with garage_engine.connect() as cnx:
@@ -680,21 +820,22 @@ def run_bot(bot_connection_string, garage_connection_string, token):
 
         not_selected = (x[0] for x in not_selected_rows)
 
-        for discord_id in not_selected:
-            msg = f"{event_name} w lidze {league_name} rozpoczyna się za {hours_text(hours_before)}. Zgłoś obecność lub nieobecność na stronie: {os.getenv('DOMAIN_NAME')}/season/{league_id}/event/{event_id}"
+        msg = (f"{event_name} w lidze {league_name} rozpoczyna się za {hours_text(hours_before)}. Zgłoś obecność lub nieobecność "
+               f"na stronie: {os.getenv('DOMAIN_NAME')}/season/{league_id}/event/{event_id}")
+        for (discord_id,) in not_selected_rows:
+            if discord_id is None:
+                continue
+            user = bot.get_user(int(discord_id))
             try:
-                user = bot.get_user(int(discord_id))
-            except discord.errors.NotFound:
-                print(f"NotFound - id: {discord_id}")
-                continue
-            except discord.errors.Forbidden:
-                print(f"Forbidden - id: {discord_id}")
-                continue
-            except discord.errors.HTTPException:
-                print(f"HTTP Exception - id: {discord_id}")
-                continue
-            if user:
+                if user is None:
+                    user = await bot.fetch_user(int(discord_id))
                 await user.send(msg)
+            except discord.NotFound:
+                log.info("Przypomnienie: nie znaleziono użytkownika %s", discord_id)
+            except discord.Forbidden:
+                log.info("Przypomnienie: użytkownik %s ma zamknięte DM-y", discord_id)
+            except discord.HTTPException as e:
+                log.warning("Przypomnienie: błąd wysyłki do %s: %s", discord_id, e)
 
     def hours_text(hours):
         if hours == 1:
