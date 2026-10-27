@@ -3,7 +3,7 @@ import os
 import sys
 
 from discord import LoginFailure
-from pymysql import OperationalError
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.engine import URL
 
 from bot import run_bot

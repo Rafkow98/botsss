@@ -8,6 +8,7 @@ from datetime import timedelta, datetime, timezone
 import pandas as pd
 
 import discord
+from discord import MessageType
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text, bindparam
@@ -33,8 +34,8 @@ def run_bot(bot_connection_string, garage_connection_string, token, connect_args
 
     connect_args = connect_args or {}
 
-    bot_engine = create_engine(bot_connection_string, pool_pre_ping=True)
-    garage_engine = create_engine(garage_connection_string, pool_pre_ping=True)
+    bot_engine = create_engine(bot_connection_string, pool_pre_ping=True, connect_args=connect_args)
+    garage_engine = create_engine(garage_connection_string, pool_pre_ping=True, connect_args=connect_args)
 
     for engine in (bot_engine, garage_engine):
         with engine.connect():
@@ -64,8 +65,10 @@ def run_bot(bot_connection_string, garage_connection_string, token, connect_args
     toxic_words = ['huj', 'cip', 'pierda', 'pierdo', 'dup', 'kurew', 'kurw', 'kutas', 'pizd', 'jeb', 'rucha', 'sra']
     racist_words = ['niger', 'nigger', 'niga', 'nyga', 'nigga', 'czarnuch', 'murzyn', 'rasis', 'rasiz']
 
-    invite_pattern = re.compile(r"(?:discord(?:app)?\s*\.\s*(?:gg | com\s * /\s * invite | io | me | li) | dsc\s *\.\s * gg "
-                                r"| invite\s *\.\s * gg)\s * /\s * [A - Zaz0 - 9 -] + ", re.IGNORECASE,)
+    invite_pattern = re.compile(
+                r"(?:discord(?:app)?\s*\.\s*(?:gg|com\s*/\s*invite|io|me|li)|dsc\s*\.\s*gg|invite\s*\.\s*gg)\s*/\s*[A-Za-z0-9-]+",
+                re.IGNORECASE,
+        )
 
     admins = [523929325171638280, 146344154887094273, 917064080366391386, 1376320417890963546, 308273688208211968, 1288993340532064338, 573780343488905221]
 
@@ -106,7 +109,7 @@ def run_bot(bot_connection_string, garage_connection_string, token, connect_args
                 await channel.send(content[i:i + chunk], allowed_mentions=NO_MENTIONS)
             except discord.HTTPException as e:
                 log.warning("Nie udało się wysłać logu: %s", e)
-            return
+                return
 
     async def check_invite(message):
         if not invite_pattern.search(message.content or ''):
@@ -136,7 +139,7 @@ def run_bot(bot_connection_string, garage_connection_string, token, connect_args
 
     @bot.event
     async def on_ready():
-        if not event_checker.is_running:
+        if not event_checker.is_running():
             event_checker.start()
 
         channels_list = []
@@ -188,6 +191,8 @@ def run_bot(bot_connection_string, garage_connection_string, token, connect_args
         if message.guild is None:
             await bot.process_commands(message)
             return
+        if bot.user in message.mentions and message.type != MessageType.reply:
+            await message.reply(random.choice(gifs))
         if message.channel.id == int(os.getenv('QUOTES_CHANNEL_ID')) and len(message.attachments) == 0:
             try:
                 await message.delete()
@@ -244,7 +249,7 @@ def run_bot(bot_connection_string, garage_connection_string, token, connect_args
     async def on_message_delete(message):
         if message.author.bot or message.guild is None:
             return
-        await send_log(f"*Usunięta wiadomość użytkownika **{discord.utils.escape_markdown(message.author.name)} ** *\n"
+        await send_log(f"*Usunięta wiadomość użytkownika **{discord.utils.escape_markdown(message.author.name)}** *\n"
             f"{message.content}")
         try:
             await run_db(delete_stored_message, message.id, message.author.id, message.content)
@@ -711,8 +716,8 @@ def run_bot(bot_connection_string, garage_connection_string, token, connect_args
             finally:
                 trapped_users.discard(member.id)
 
-            asyncio.create_task(purge_and_release())
-            asyncio.create_task(send_warning_dm(member, timeout_minutes))
+        asyncio.create_task(purge_and_release())
+        asyncio.create_task(send_warning_dm(member, timeout_minutes))
 
     async def send_warning_dm(member, timeout_minutes):
         try:
@@ -779,15 +784,19 @@ def run_bot(bot_connection_string, garage_connection_string, token, connect_args
                 log.exception("event_checker: błąd przy evencie %s", event[1])
 
     async def schedule_reminders():
-        with garage_engine.connect() as cnx:
-            reminders = cnx.execute(text("""
-                SELECT e.id, e.name, l.id, l.name, emb.value, DATE_SUB(e.start_date, INTERVAL emb.value HOUR) AS reminder_time
-                FROM discord_bot_events dbe
-                LEFT JOIN event e on dbe.event_id = e.id
-                LEFT JOIN league l on e.league_id = l.id
-                RIGHT JOIN event_mention_before emb on l.id = emb.league_id
-                WHERE DATE_SUB(e.start_date, INTERVAL emb.value HOUR) >= NOW();
-            """)).fetchall()
+        try:
+            with garage_engine.connect() as cnx:
+                reminders = cnx.execute(text("""
+                    SELECT e.id, e.name, l.id, l.name, emb.value, DATE_SUB(e.start_date, INTERVAL emb.value HOUR) AS reminder_time
+                    FROM discord_bot_events dbe
+                    LEFT JOIN event e on dbe.event_id = e.id
+                    LEFT JOIN league l on e.league_id = l.id
+                    RIGHT JOIN event_mention_before emb on l.id = emb.league_id
+                    WHERE DATE_SUB(e.start_date, INTERVAL emb.value HOUR) >= NOW();
+                """)).fetchall()
+        except Exception:
+            log.exception("schedule_reminders: błąd pobierania przypomnień")
+            return
 
         for r in reminders:
             try:
@@ -800,7 +809,7 @@ def run_bot(bot_connection_string, garage_connection_string, token, connect_args
                     replace_existing=True,
                 )
             except Exception:
-                log.exception("event_checker: błąd przy evencie %s", r[0])
+                log.exception("schedule_reminders: błąd przy evencie %s", r[0])
 
 
     async def send_reminder(event_id, event_name, league_id, league_name, hours_before):
@@ -817,8 +826,6 @@ def run_bot(bot_connection_string, garage_connection_string, token, connect_args
                 LEFT JOIN driver_leagues dl ON dl.drivers_id = d.id AND dl.leagues_id = l.id
                 INNER JOIN team t ON dl.team_id = t.id AND t.deleted <> 1 AND t.name <> 'Rezerwa'
                 WHERE e.id = :event_id AND p.deleted <> 1);"""), {'league_id': league_id, 'event_id': event_id}).fetchall()
-
-        not_selected = (x[0] for x in not_selected_rows)
 
         msg = (f"{event_name} w lidze {league_name} rozpoczyna się za {hours_text(hours_before)}. Zgłoś obecność lub nieobecność "
                f"na stronie: {os.getenv('DOMAIN_NAME')}/season/{league_id}/event/{event_id}")
