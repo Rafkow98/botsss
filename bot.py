@@ -67,7 +67,7 @@ def run_bot(bot_connection_string, garage_connection_string, token, connect_args
     invite_pattern = re.compile(r"(?:discord(?:app)?\s*\.\s*(?:gg | com\s * /\s * invite | io | me | li) | dsc\s *\.\s * gg "
                                 r"| invite\s *\.\s * gg)\s * /\s * [A - Zaz0 - 9 -] + ", re.IGNORECASE,)
 
-    admins = [523929325171638280, 146344154887094273, 917064080366391386, 686636820196491305, 1376320417890963546, 308273688208211968, 1288993340532064338, 573780343488905221]
+    admins = [523929325171638280, 146344154887094273, 917064080366391386, 1376320417890963546, 308273688208211968, 1288993340532064338, 573780343488905221]
 
     trapped_users = set()
 
