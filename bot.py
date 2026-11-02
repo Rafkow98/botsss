@@ -787,11 +787,13 @@ def run_bot(bot_connection_string, garage_connection_string, token, connect_args
         try:
             with garage_engine.connect() as cnx:
                 reminders = cnx.execute(text("""
-                    SELECT e.id, e.name, l.id, l.name, emb.value, DATE_SUB(e.start_date, INTERVAL emb.value HOUR) AS reminder_time
+                    SELECT e.id, e.name, l.id, l.name, emb.value, DATE_SUB(e.start_date, INTERVAL emb.value HOUR) AS reminder_time, gf.send_post_channel_id
                     FROM discord_bot_events dbe
                     LEFT JOIN event e on dbe.event_id = e.id
                     LEFT JOIN league l on e.league_id = l.id
                     RIGHT JOIN event_mention_before emb on l.id = emb.league_id
+                    LEFT JOIN game g ON l.game_id = g.id
+                    LEFT JOIN game gf ON g.game_family_id = gf.id
                     WHERE DATE_SUB(e.start_date, INTERVAL emb.value HOUR) >= NOW();
                 """)).fetchall()
         except Exception:
@@ -804,7 +806,7 @@ def run_bot(bot_connection_string, garage_connection_string, token, connect_args
                     send_reminder,
                     "date",
                     run_date=r[5],
-                    args=[r[0], r[1], r[2], r[3], r[4]],
+                    args=[r[0], r[1], r[2], r[3], r[4], r[5]],
                     id=f"reminder_{r[0]}_{r[4]}",
                     replace_existing=True,
                 )
@@ -812,7 +814,7 @@ def run_bot(bot_connection_string, garage_connection_string, token, connect_args
                 log.exception("schedule_reminders: błąd przy evencie %s", r[0])
 
 
-    async def send_reminder(event_id, event_name, league_id, league_name, hours_before):
+    async def send_reminder(event_id, event_name, league_id, league_name, hours_before, channel_id):
         with garage_engine.connect() as cnx:
             not_selected_rows = cnx.execute(text("""SELECT du.id FROM driver_leagues dl
                 INNER JOIN team t ON dl.team_id = t.id AND t.deleted <> 1 AND t.name <> 'Rezerwa'
@@ -829,6 +831,8 @@ def run_bot(bot_connection_string, garage_connection_string, token, connect_args
 
         msg = (f"{event_name} w lidze {league_name} rozpoczyna się za {hours_text(hours_before)}. Zgłoś obecność lub nieobecność "
                f"na stronie: {os.getenv('DOMAIN_NAME')}/season/{league_id}/event/{event_id}")
+        closed_dms = []
+
         for (discord_id,) in not_selected_rows:
             if discord_id is None:
                 continue
@@ -841,8 +845,21 @@ def run_bot(bot_connection_string, garage_connection_string, token, connect_args
                 log.info("Przypomnienie: nie znaleziono użytkownika %s", discord_id)
             except discord.Forbidden:
                 log.info("Przypomnienie: użytkownik %s ma zamknięte DM-y", discord_id)
+                closed_dms.append(discord_id)
             except discord.HTTPException as e:
                 log.warning("Przypomnienie: błąd wysyłki do %s: %s", discord_id, e)
+                closed_dms.append(discord_id)
+
+        if closed_dms:
+            channel = bot.get_channel(int(channel_id))
+            if channel is None:
+                await bot.fetch_channel(int(channel_id))
+
+            mentions = " ".join(f"<@{discord_id}>" for discord_id in closed_dms)
+            try:
+                await channel.send(mentions, allowed_mentions=NO_MENTIONS)
+            except Exception:
+                log.warning("Przypomnienie: błąd wysyłki na kanał")
 
     def hours_text(hours):
         if hours == 1:
